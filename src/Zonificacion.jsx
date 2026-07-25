@@ -145,8 +145,10 @@ export default function Zonificacion({ user, onBack }) {
   var [showAssign, setShowAssign] = useState(false);
   var [depurando, setDepurando] = useState(null); // pedido id being depurated
   var [depurRows, setDepurRows] = useState({}); // { prod_id: "entregado"|"rechazado" }
-  var [showHDR, setShowHDR] = useState(null); // vehiculo id to show HDR for
+  var [depurQty, setDepurQty] = useState({}); // { prod_id: cantidad_entregada }
+  var [showHDR, setShowHDR] = useState(null);
   var [manualOrder, setManualOrder] = useState({}); // { pedido_id: number }
+  var [reporteEntregas, setReporteEntregas] = useState([]);
   var searchRef = useRef();
 
   /* ── Load Data ── */
@@ -241,6 +243,11 @@ export default function Zonificacion({ user, onBack }) {
 
   /* ── Depuración total: entregado ── */
   async function depurarTotal(id, resultado) {
+    var pedido = pedidos.find(function (p) { return p.id === id; });
+    var prods = productosPedido.filter(function (pp) { return pp.pedido_id === id; });
+    // Save to daily report
+    var items = prods.map(function (pp) { return { producto: pp.producto, cantidad: pp.cantidad_pedida, precio: pp.precio_unitario, rechazado: resultado === "rechazado" }; });
+    setReporteEntregas(function (prev) { return [...prev, { pedido_id: id, direccion: pedido.direccion, localidad: pedido.localidad, vendedor_id: pedido.vendedor_id, fecha: today(), resultado: resultado, items: items }]; });
     await supabase.from("pedidos").update({ estado: "depurado", fecha_depurado: today(), nota_depuracion: resultado === "entregado" ? "Entregado total" : "Rechazado total" }).eq("id", id);
     setPedidos(function (prev) { return prev.map(function (p) { return p.id === id ? { ...p, estado: "depurado", fecha_depurado: today() } : p; }); });
     setDepurando(null);
@@ -252,29 +259,64 @@ export default function Zonificacion({ user, onBack }) {
     setPedidos(function (prev) { return prev.map(function (p) { return p.id === id ? { ...p, estado: "disponible", color_asignado: null } : p; }); });
   }
 
-  /* ── Depuración parcial ── */
+  /* ── Depuración parcial con cantidades ── */
   async function confirmarParcial(pedidoId) {
     var prods = productosPedido.filter(function (pp) { return pp.pedido_id === pedidoId; });
-    var entregados = prods.filter(function (pp) { return depurRows[pp.id] === "entregado" || depurRows[pp.id] === "rechazado"; });
-    var pendientes = prods.filter(function (pp) { return !depurRows[pp.id]; });
+    var pedido = pedidos.find(function (p) { return p.id === pedidoId; });
+    var entregaItems = [];
+    var pendienteUpdates = [];
+    var deleteIds = [];
 
-    // Delete delivered/rejected rows
-    if (entregados.length > 0) {
-      var eIds = entregados.map(function (pp) { return pp.id; });
-      await supabase.from("productos_pedido").delete().in("id", eIds);
-      setProductosPedido(function (prev) { return prev.filter(function (pp) { return eIds.indexOf(pp.id) < 0; }); });
+    for (var i = 0; i < prods.length; i++) {
+      var pp = prods[i];
+      var estado = depurRows[pp.id];
+      var qtyEntregada = depurQty[pp.id] !== undefined ? depurQty[pp.id] : pp.cantidad_pedida;
+
+      if (estado === "entregado") {
+        if (qtyEntregada >= pp.cantidad_pedida) {
+          // Entregado total de esta fila
+          entregaItems.push({ producto: pp.producto, cantidad: pp.cantidad_pedida, precio: pp.precio_unitario });
+          deleteIds.push(pp.id);
+        } else {
+          // Entregado parcial: entrega qtyEntregada, queda el resto
+          var restante = pp.cantidad_pedida - qtyEntregada;
+          entregaItems.push({ producto: pp.producto, cantidad: qtyEntregada, precio: pp.precio_unitario });
+          pendienteUpdates.push({ id: pp.id, cantidad_pedida: restante });
+        }
+      } else if (estado === "rechazado") {
+        entregaItems.push({ producto: pp.producto, cantidad: pp.cantidad_pedida, precio: pp.precio_unitario, rechazado: true });
+        deleteIds.push(pp.id);
+      }
+      // Si no tiene estado, queda como está (pendiente)
     }
 
-    if (pendientes.length > 0) {
-      // Partial: return to zonificación with DEPURADO label
+    // Guardar en reporte diario
+    if (entregaItems.length > 0) {
+      setReporteEntregas(function (prev) { return [...prev, { pedido_id: pedidoId, direccion: pedido.direccion, localidad: pedido.localidad, vendedor_id: pedido.vendedor_id, fecha: today(), items: entregaItems }]; });
+    }
+
+    // Borrar filas entregadas/rechazadas completas
+    if (deleteIds.length > 0) {
+      await supabase.from("productos_pedido").delete().in("id", deleteIds);
+      setProductosPedido(function (prev) { return prev.filter(function (pp) { return deleteIds.indexOf(pp.id) < 0; }); });
+    }
+
+    // Actualizar cantidades de filas parciales
+    for (var j = 0; j < pendienteUpdates.length; j++) {
+      await supabase.from("productos_pedido").update({ cantidad_pedida: pendienteUpdates[j].cantidad_pedida }).eq("id", pendienteUpdates[j].id);
+      setProductosPedido(function (prev) { return prev.map(function (pp) { var upd = pendienteUpdates.find(function (u) { return u.id === pp.id; }); return upd ? { ...pp, cantidad_pedida: upd.cantidad_pedida } : pp; }); });
+    }
+
+    // Verificar si quedan productos pendientes
+    var prodsRestantes = productosPedido.filter(function (pp) { return pp.pedido_id === pedidoId && deleteIds.indexOf(pp.id) < 0; });
+    if (prodsRestantes.length > 0 || pendienteUpdates.length > 0) {
       await supabase.from("pedidos").update({ estado: "disponible", color_asignado: null, nota_depuracion: "(DEPURADO " + fmtDate(today()) + ")" }).eq("id", pedidoId);
       setPedidos(function (prev) { return prev.map(function (p) { return p.id === pedidoId ? { ...p, estado: "disponible", color_asignado: null, nota_depuracion: "(DEPURADO " + fmtDate(today()) + ")" } : p; }); });
     } else {
-      // All rows handled = full depuration
-      await supabase.from("pedidos").update({ estado: "depurado", fecha_depurado: today(), nota_depuracion: "Depurado parcial completo" }).eq("id", pedidoId);
+      await supabase.from("pedidos").update({ estado: "depurado", fecha_depurado: today(), nota_depuracion: "Depurado completo" }).eq("id", pedidoId);
       setPedidos(function (prev) { return prev.map(function (p) { return p.id === pedidoId ? { ...p, estado: "depurado" } : p; }); });
     }
-    setDepurando(null); setDepurRows({});
+    setDepurando(null); setDepurRows({}); setDepurQty({});
   }
 
   /* ── Delete ── */
@@ -374,20 +416,24 @@ export default function Zonificacion({ user, onBack }) {
         {/* Product rows */}
         <div style={{ marginTop: 4, marginLeft: opts.selectable ? 28 : 0 }}>
           {prods.map(function (pp) {
-            var rowStyle = { fontSize: 12, color: "#475569", padding: "2px 0", display: "flex", justifyContent: "space-between", alignItems: "center" };
-            if (isDepurando && depurRows[pp.id]) {
-              rowStyle.textDecoration = "line-through";
-              rowStyle.opacity = 0.5;
-            }
+            var rowStyle = { fontSize: 12, color: "#475569", padding: "3px 0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 };
+            var isMarked = isDepurando && depurRows[pp.id];
+            if (isMarked) { rowStyle.opacity = 0.6; }
             return (
               <div key={pp.id} style={rowStyle}>
-                <span>{pp.cantidad_pedida} {pp.producto}{pp.precio_unitario > 0 ? " " + fmtMoney(pp.precio_unitario) : ""}</span>
+                <span style={{ textDecoration: isMarked ? "line-through" : "none" }}>{pp.cantidad_pedida} {pp.producto}{pp.precio_unitario > 0 ? " " + fmtMoney(pp.precio_unitario) : ""}</span>
                 {isDepurando && (
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <button onClick={function () { setDepurRows(function (pr) { return { ...pr, [pp.id]: depurRows[pp.id] === "entregado" ? undefined : "entregado" }; }); }} style={S.btnSm(depurRows[pp.id] === "entregado" ? "#16a34a" : "#d1d5db")}>✓</button>
-                    <button onClick={function () { setDepurRows(function (pr) { return { ...pr, [pp.id]: depurRows[pp.id] === "rechazado" ? undefined : "rechazado" }; }); }} style={S.btnSm(depurRows[pp.id] === "rechazado" ? "#dc2626" : "#d1d5db")}>✗</button>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    {depurRows[pp.id] === "entregado" && pp.cantidad_pedida > 1 && (
+                      <input type="number" min="1" max={pp.cantidad_pedida} value={depurQty[pp.id] !== undefined ? depurQty[pp.id] : pp.cantidad_pedida} onChange={function () { var ppId = pp.id; var max = pp.cantidad_pedida; return function (e) { var v = Math.min(Math.max(parseInt(e.target.value) || 1, 1), max); setDepurQty(function (pr) { return { ...pr, [ppId]: v }; }); }; }()} style={{ width: 50, padding: "2px 4px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 11, textAlign: "center" }} title="Cantidad entregada" />
+                    )}
+                    <button onClick={function () { var ppId = pp.id; return function () { setDepurRows(function (pr) { var c = { ...pr }; if (c[ppId] === "entregado") { delete c[ppId]; } else { c[ppId] = "entregado"; } return c; }); }; }()} style={S.btnSm(depurRows[pp.id] === "entregado" ? "#16a34a" : "#d1d5db")}>✓</button>
+                    <button onClick={function () { var ppId = pp.id; return function () { setDepurRows(function (pr) { var c = { ...pr }; if (c[ppId] === "rechazado") { delete c[ppId]; } else { c[ppId] = "rechazado"; } return c; }); }; }()} style={S.btnSm(depurRows[pp.id] === "rechazado" ? "#dc2626" : "#d1d5db")}>✗</button>
                   </div>
                 )}
+              </div>
+            );
+          })}
               </div>
             );
           })}
@@ -448,6 +494,7 @@ export default function Zonificacion({ user, onBack }) {
           <button onClick={function () { setShowAdd(!showAdd); setTab("zona"); }} style={S.btn(showAdd ? "#94a3b8" : "#0284C7")}>+ Cargar pedido</button>
           <button onClick={function () { setTab("zona"); }} style={S.btn(tab === "zona" ? "#0284C7" : "#94a3b8")}>Por zona</button>
           <button onClick={function () { setTab("en_calle"); }} style={S.btn(tab === "en_calle" ? "#E65100" : "#94a3b8")}>Pedidos en calle ({totalEnCalle})</button>
+          <button onClick={function () { setTab("reporte"); }} style={S.btn(tab === "reporte" ? "#16a34a" : "#94a3b8")}>Reporte diario ({reporteEntregas.length})</button>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {selectedCount > 0 && <button onClick={function () { setShowAssign(true); }} style={S.btn("#16a34a")}>Asignar {selectedCount} a camioneta</button>}
@@ -620,6 +667,52 @@ export default function Zonificacion({ user, onBack }) {
             </div>
           );
         })()}
+
+        {/* ═══ REPORTE DIARIO ═══ */}
+        {tab === "reporte" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h2 style={{ margin: 0, fontSize: 17, color: "#1a1a1a" }}>Reporte diario — {fmtDate(today())}</h2>
+              <button onClick={function () {
+                if (reporteEntregas.length === 0) return;
+                var rows = reporteEntregas.map(function (e) {
+                  var vend = vendedores.find(function (v) { return v.id === e.vendedor_id; });
+                  var itemsText = e.items.map(function (it) { return (it.rechazado ? "[RECH] " : "") + it.cantidad + " " + it.producto + (it.precio > 0 ? " $" + Number(it.precio).toLocaleString("es-AR") : ""); }).join("<br/>");
+                  return "<tr><td style='border:1px solid #ccc;padding:6px;font-weight:700'>" + e.direccion + " " + (e.localidad || "").toUpperCase() + "</td><td style='border:1px solid #ccc;padding:6px'>" + (vend ? vend.nombre : "-") + "</td><td style='border:1px solid #ccc;padding:6px'>" + (e.resultado === "rechazado" ? "RECHAZADO" : "ENTREGADO") + "</td><td style='border:1px solid #ccc;padding:6px;font-size:11px'>" + itemsText + "</td></tr>";
+                }).join("");
+                var html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Reporte " + today() + "</title><style>*{box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px;font-size:12px}table{border-collapse:collapse;width:100%}@media print{.no-print{display:none!important}}@page{size:A4;margin:10mm}</style></head><body><div class='no-print' style='text-align:center;margin-bottom:12px'><button onclick='window.print()' style='background:#16a34a;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer'>Imprimir / PDF</button></div><h2 style='text-align:center'>REPORTE DIARIO — " + new Date().toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) + "</h2><p style='text-align:center;color:#666'>Total: " + reporteEntregas.length + " entregas</p><table><tr style='background:#1a1a1a;color:#fff'><th style='border:1px solid #ccc;padding:8px;text-align:left'>Cliente</th><th style='border:1px solid #ccc;padding:8px'>Vendedor</th><th style='border:1px solid #ccc;padding:8px'>Estado</th><th style='border:1px solid #ccc;padding:8px'>Productos</th></tr>" + rows + "</table><p style='text-align:center;margin-top:20px;color:#aaa;font-size:10px'>Distribuidora Pianyi — " + new Date().toLocaleString("es-AR") + "</p></body></html>";
+                var w = window.open("", "_blank"); w.document.write(html); w.document.close();
+              }} style={S.btn("#16a34a")} disabled={reporteEntregas.length === 0}>Exportar PDF</button>
+            </div>
+            {reporteEntregas.length === 0 ? (
+              <div style={{ ...S.card, textAlign: "center", color: "#94a3b8", padding: 36 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 15 }}>No hay entregas registradas hoy</p>
+                <p style={{ fontSize: 13, margin: 0 }}>Las entregas aparecen cuando depurás pedidos desde "Pedidos en calle"</p>
+              </div>
+            ) : (
+              reporteEntregas.map(function (e, idx) {
+                var vend = vendedores.find(function (v) { return v.id === e.vendedor_id; });
+                return (
+                  <div key={idx} style={{ ...S.card, borderLeft: "4px solid " + (e.resultado === "rechazado" ? "#dc2626" : "#16a34a") }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>{e.direccion}</span>
+                        {e.localidad && <span style={{ fontSize: 12, color: "#64748b", marginLeft: 6 }}>{e.localidad.toUpperCase()}</span>}
+                        {vend && <span style={{ fontSize: 11, color: "#E65100", marginLeft: 6 }}>{vend.nombre}</span>}
+                      </div>
+                      <span style={S.badge(e.resultado === "rechazado" ? "#fee2e2" : "#dcfce7", e.resultado === "rechazado" ? "#991b1b" : "#166534")}>{e.resultado === "rechazado" ? "RECHAZADO" : "ENTREGADO"}</span>
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      {e.items.map(function (it, j) {
+                        return <div key={j} style={{ fontSize: 12, color: it.rechazado ? "#dc2626" : "#475569", padding: "1px 0", textDecoration: it.rechazado ? "line-through" : "none" }}>{it.cantidad} {it.producto}{it.precio > 0 ? " " + fmtMoney(it.precio) : ""}</div>;
+                      })}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
