@@ -154,6 +154,14 @@ const S = {
 /* ── Module definitions ── */
 var MODULES = [
   {
+    id: "zonificacion",
+    name: "Zonificación",
+    desc: "Carga de pedidos, asignación a vehículos y armado de repartos",
+    icon: "transferencias",
+    color: "#0284C7",
+    active: false
+  },
+  {
     id: "transferencias",
     name: "Control de Transferencias",
     desc: "Ruteo de cobros, comprobantes y reportes de pago",
@@ -163,43 +171,51 @@ var MODULES = [
     url: "https://control-transferencias.vercel.app"
   },
   {
-    id: "comisiones",
-    name: "Comisiones de Vendedores",
-    desc: "Cálculo y seguimiento de comisiones por vendedor",
-    icon: "comisiones",
+    id: "reparto",
+    name: "Control del Reparto",
+    desc: "Seguimiento de entregas, cobranza y cierre del día en vivo",
+    icon: "reparto",
     color: "#7C3AED",
     active: false
   },
   {
-    id: "reparto",
-    name: "Control del Reparto",
-    desc: "Seguimiento de vehículos, pedidos y entregas",
-    icon: "reparto",
-    color: "#0284C7",
+    id: "cobros",
+    name: "Cobros Pendientes",
+    desc: "Clientes con saldos pendientes, seguimiento y alertas en HDR",
+    icon: "calendario",
+    color: "#DC2626",
+    active: false
+  },
+  {
+    id: "comisiones",
+    name: "Comisiones de Vendedores",
+    desc: "Cálculo automático al 2% sobre lo cobrado, reportes por vendedor",
+    icon: "comisiones",
+    color: "#059669",
     active: false
   },
   {
     id: "calendario",
     name: "Calendario de Pagos / Gastos",
-    desc: "Agenda de vencimientos, pagos y gastos fijos",
+    desc: "Agenda de vencimientos, pagos a proveedores y gastos fijos",
     icon: "calendario",
-    color: "#059669",
+    color: "#D97706",
     active: false
   },
   {
     id: "vehiculos",
     name: "Control de Vehículos",
-    desc: "Mantenimiento, combustible y estado de la flota",
+    desc: "Siniestros, VTV, services, kilometraje y estado de la flota",
     icon: "vehiculos",
-    color: "#DC2626",
+    color: "#6366F1",
     active: false
   },
   {
     id: "presentismo",
     name: "Presentismo",
-    desc: "Asistencia, horarios y registro del equipo",
+    desc: "Asistencia, fichero, vacaciones y premios/sanciones",
     icon: "presentismo",
-    color: "#D97706",
+    color: "#0891B2",
     active: false
   },
 ];
