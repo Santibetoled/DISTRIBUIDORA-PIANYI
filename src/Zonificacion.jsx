@@ -93,34 +93,60 @@ function parsePedido(text, barriosList) {
   return { direccion: direccion, localidad: localidad, rangoHorario: rangoHorario, vendedor: vendedor, barrioMatch: barrioMatch, productos: productos };
 }
 
-/* ── HDR Print Generator ── */
-function generateHDR(vehiculo, pedidosList, productosPedido) {
+/* ── HDR Print Generator (A4 optimized) ── */
+function generateHDR(vehiculo, pedidosList, productosPedido, vendedores, rutaCfg) {
+  var fecha = new Date().toLocaleDateString("es-AR");
   var rows = pedidosList.map(function (p, idx) {
     var prods = productosPedido.filter(function (pp) { return pp.pedido_id === p.id; });
-    var prodText = prods.map(function (pp) { return pp.cantidad_pedida + " " + pp.producto + (pp.precio_unitario > 0 ? " $" + Number(pp.precio_unitario).toLocaleString("es-AR") : ""); }).join(" | ");
-    return '<div style="margin:10px 0;page-break-inside:avoid;">'
-      + '<div style="font-weight:700;font-size:12px;">' + (idx + 1) + '. ' + (p.direccion || "") + ' ' + (p.localidad || "").toUpperCase() + (p.rango_horario ? ' ' + p.rango_horario : '') + '</div>'
-      + '<div style="font-size:11px;color:#333;margin:2px 0 0 16px;">' + prodText + '</div>'
+    var vend = vendedores.find(function (v) { return v.id === p.vendedor_id; });
+    var prodLines = [];
+    var line = [];
+    prods.forEach(function (pp, i) {
+      var txt = pp.cantidad_pedida + " " + pp.producto + (pp.precio_unitario > 0 ? " $" + Number(pp.precio_unitario).toLocaleString("es-AR") : "");
+      line.push(txt);
+      if (line.length === 2 || i === prods.length - 1) { prodLines.push(line.join(" | ")); line = []; }
+    });
+    return '<div style="margin:6px 0;page-break-inside:avoid;">'
+      + '<p style="margin:0;font-weight:700;font-size:11px;">' + (p.fecha_pedido ? p.fecha_pedido.substring(5).replace("-", "/") + " " : "") + (p.direccion || "").toUpperCase() + " " + (p.localidad || "").toUpperCase() + (p.rango_horario ? " " + p.rango_horario : "") + (vend ? " " + vend.nombre.toUpperCase() : "") + '</p>'
+      + prodLines.map(function (l) { return '<p style="margin:1px 0 0 12px;font-size:10px;">- ' + l + '</p>'; }).join("")
       + '</div>';
   }).join("");
 
-  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>HDR ' + vehiculo.patente + '</title>'
-    + '<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:16px;font-size:12px}'
-    + 'table{border-collapse:collapse;width:100%}td,th{border:1px solid #000;padding:6px 8px;font-size:11px}'
-    + '@media print{.no-print{display:none!important}}@page{size:A4;margin:10mm}'
+  var origen = (rutaCfg && rutaCfg.origen) ? rutaCfg.origen : "Depósito";
+  var destino = (rutaCfg && rutaCfg.destino) ? rutaCfg.destino : "Depósito";
+
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>HDR ' + vehiculo.patente + ' ' + fecha + '</title>'
+    + '<style>'
+    + '*{box-sizing:border-box;margin:0;padding:0}'
+    + 'body{font-family:Arial,Helvetica,sans-serif;padding:10mm;font-size:11px;color:#000}'
+    + 'table{border-collapse:collapse;width:100%;margin-bottom:3px}'
+    + 'td,th{border:1px solid #000;padding:4px 6px;font-size:10px;vertical-align:middle}'
+    + '.header-table td{height:22px}'
+    + '@media print{.no-print{display:none!important}}'
+    + '@page{size:A4;margin:8mm}'
     + '</style></head><body>'
-    + '<div class="no-print" style="text-align:center;margin-bottom:12px;"><button onclick="window.print()" style="background:#E65100;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer;">Imprimir / PDF</button></div>'
-    + '<table><tr><td><b>FECHA</b></td><td>' + new Date().toLocaleDateString("es-AR") + '</td><td><b>VEHICULO</b></td><td>' + vehiculo.patente + '</td><td><b>NV DIA</b></td><td></td><td><b>FALTANTES</b></td><td><b>FIRMA ADM</b></td></tr>'
-    + '<tr><td><b>CARGA</b></td><td></td><td><b>CHOFER</b></td><td>' + (vehiculo.chofer_habitual || "") + '</td><td><b>NV PEND</b></td><td></td><td></td><td rowspan="2"><b>FIRMA REPARTO</b></td></tr>'
-    + '<tr><td><b>CONTROL</b></td><td></td><td><b>ACOMP.</b></td><td>' + (vehiculo.acompanante_habitual || "") + '</td><td><b>TOTAL NV</b></td><td>' + pedidosList.length + '</td><td></td></tr></table>'
-    + '<table style="margin-top:4px;"><tr><td><b>TOTAL NV DIARIAS</b></td><td><b>CASH</b></td><td><b>TRANSFERENCIAS</b></td><td><b>CANT</b></td><td><b>FIRMAS</b></td><td><b>CANT</b></td><td><b>DESCUENTOS</b></td><td><b>SOBRANTES</b></td><td><b>PEND.CASH</b></td><td><b>PEND.TRANSF</b></td></tr>'
-    + '<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>'
-    + '<table style="margin-top:4px;"><tr><td><b>FACTURACION</b></td><td></td><td><b>CAJA CASH</b></td><td></td></tr></table>'
-    + '<hr style="margin:12px 0;border:1px solid #000;">'
+    + '<div class="no-print" style="text-align:center;margin-bottom:10px;"><button onclick="window.print()" style="background:#E65100;color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:14px;font-weight:700;cursor:pointer;">Imprimir / Guardar PDF</button></div>'
+    // Header table
+    + '<table class="header-table">'
+    + '<tr><td style="width:12%"><b>FECHA</b></td><td style="width:13%">' + fecha + '</td><td style="width:12%"><b>VEHICULO</b></td><td style="width:18%">' + vehiculo.patente + '</td><td style="width:10%"><b>NV DIA</b></td><td style="width:8%"></td><td style="width:15%"><b>FALTANTES</b></td><td style="width:12%"><b>FIRMA ADM</b></td></tr>'
+    + '<tr><td><b>CARGA</b></td><td></td><td><b>CHOFER</b></td><td>' + (vehiculo.chofer_habitual || "") + '</td><td><b>NV PEND</b></td><td></td><td></td><td rowspan="2" style="text-align:center"><b>FIRMA REPARTO</b></td></tr>'
+    + '<tr><td><b>CONTROL</b></td><td></td><td><b>ACOMP.</b></td><td>' + (vehiculo.acompanante_habitual || "") + '</td><td><b>TOTAL NV</b></td><td><b>' + pedidosList.length + '</b></td><td></td></tr>'
+    + '</table>'
+    // Totals table
+    + '<table class="header-table">'
+    + '<tr><td><b>TOTAL NV</b></td><td><b>CASH</b></td><td><b>TRANSF.</b></td><td><b>FIRMAS</b></td><td><b>CANT</b></td><td><b>DESC.</b></td><td><b>SOBRANTES</b></td><td><b>P.CASH</b></td><td><b>P.TRANSF</b></td></tr>'
+    + '<tr><td style="height:20px"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>'
+    + '</table>'
+    + '<table class="header-table"><tr><td style="width:50%"><b>FACTURACION</b></td><td></td><td><b>CAJA CASH</b></td><td></td></tr></table>'
+    // Route info
+    + '<div style="margin:6px 0;font-size:9px;color:#666;">Origen: ' + origen + ' — Destino: ' + destino + '</div>'
+    + '<hr style="border:1px solid #000;margin:4px 0 8px;">'
+    // Pedidos
     + rows
-    + '<hr style="margin:16px 0;border:1px solid #000;">'
-    + '<table><tr><td><b>ROTURAS</b></td><td style="width:50%"><b>SOBRANTES</b></td><td><b>FIRMA ADM</b></td><td><b>FIRMA REPARTO</b></td></tr>'
-    + '<tr><td style="height:60px"></td><td></td><td></td><td></td></tr></table>'
+    // Footer
+    + '<hr style="border:1px solid #000;margin:10px 0 4px;">'
+    + '<table><tr><td style="width:25%;height:50px"><b>ROTURAS</b></td><td style="width:40%"><b>SOBRANTES</b></td><td style="width:17%"><b>FIRMA ADM</b></td><td style="width:18%"><b>FIRMA REPARTO</b></td></tr>'
+    + '<tr><td style="height:50px"></td><td></td><td></td><td></td></tr></table>'
     + '</body></html>';
 }
 
@@ -149,6 +175,7 @@ export default function Zonificacion({ user, onBack }) {
   var [showHDR, setShowHDR] = useState(null);
   var [manualOrder, setManualOrder] = useState({}); // { pedido_id: number }
   var [reporteEntregas, setReporteEntregas] = useState([]);
+  var [rutaConfig, setRutaConfig] = useState({}); // { vehiculo_id: { origen: "", destino: "" } }
   var searchRef = useRef();
 
   /* ── Load Data ── */
@@ -333,12 +360,28 @@ export default function Zonificacion({ user, onBack }) {
     var veh = vehiculos.find(function (v) { return v.id === vehiculoId; });
     if (!veh) return;
     var vehPedidos = getEnCalle().filter(function (p) { return p.color_asignado === veh.color_hex; });
-    // Apply manual order if set
+    // Sort by manual order
     vehPedidos.sort(function (a, b) { return (manualOrder[a.id] || 999) - (manualOrder[b.id] || 999); });
-    var html = generateHDR(veh, vehPedidos, productosPedido);
+    var cfg = rutaConfig[vehiculoId] || { origen: "Depósito", destino: "Depósito" };
+    var html = generateHDR(veh, vehPedidos, productosPedido, vendedores, cfg);
     var w = window.open("", "_blank");
     w.document.write(html);
     w.document.close();
+  }
+
+  /* ── Reorder visually ── */
+  function aplicarOrden(vehiculoId) {
+    var veh = vehiculos.find(function (v) { return v.id === vehiculoId; });
+    if (!veh) return;
+    var vehPedidos = pedidos.filter(function (p) { return p.estado === "en_calle" && p.color_asignado === veh.color_hex; });
+    // If no manual order set, do nothing
+    var hasOrder = vehPedidos.some(function (p) { return manualOrder[p.id]; });
+    if (!hasOrder) return;
+    // Sort and renumber 1,2,3...
+    var sorted = vehPedidos.slice().sort(function (a, b) { return (manualOrder[a.id] || 999) - (manualOrder[b.id] || 999); });
+    var newOrder = {};
+    sorted.forEach(function (p, idx) { newOrder[p.id] = idx + 1; });
+    setManualOrder(function (prev) { return { ...prev, ...newOrder }; });
   }
 
   /* ── Filters ── */
@@ -431,9 +474,6 @@ export default function Zonificacion({ user, onBack }) {
                     <button onClick={function () { var ppId = pp.id; return function () { setDepurRows(function (pr) { var c = { ...pr }; if (c[ppId] === "rechazado") { delete c[ppId]; } else { c[ppId] = "rechazado"; } return c; }); }; }()} style={S.btnSm(depurRows[pp.id] === "rechazado" ? "#dc2626" : "#d1d5db")}>✗</button>
                   </div>
                 )}
-              </div>
-            );
-          })}
               </div>
             );
           })}
@@ -645,11 +685,24 @@ export default function Zonificacion({ user, onBack }) {
                 var v = g.vehiculo;
                 return (
                   <div key={vid} style={{ marginBottom: 14 }}>
-                    <div style={{ background: v.color_hex, color: "#fff", padding: "10px 14px", borderRadius: "10px 10px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontWeight: 700, fontSize: 14 }}>{v.patente} — {v.chofer_habitual || ""}</span>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <span style={{ fontSize: 12, opacity: 0.9 }}>{g.pedidos.length} pedidos</span>
-                        <button onClick={function () { printHDR(v.id); }} style={S.btnSm("rgba(255,255,255,.3)")}>Imprimir HDR</button>
+                    <div style={{ background: v.color_hex, color: "#fff", padding: "10px 14px", borderRadius: "10px 10px 0 0" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontWeight: 700, fontSize: 14 }}>{v.patente} — {v.chofer_habitual || v.alias || ""}</span>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <span style={{ fontSize: 12, opacity: 0.9 }}>{g.pedidos.length} pedidos</span>
+                          <button onClick={function () { aplicarOrden(v.id); }} style={S.btnSm("rgba(255,255,255,.25)")}>Reordenar</button>
+                          <button onClick={function () { printHDR(v.id); }} style={S.btnSm("rgba(255,255,255,.4)")}>Imprimir HDR</button>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, fontSize: 11 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ opacity: 0.7 }}>Origen:</span>
+                          <input type="text" placeholder="Depósito" value={(rutaConfig[v.id] || {}).origen || ""} onClick={function (e) { e.stopPropagation(); }} onChange={function () { var vid = v.id; return function (e) { setRutaConfig(function (prev) { return { ...prev, [vid]: { ...(prev[vid] || {}), origen: e.target.value } }; }); }; }()} style={{ background: "rgba(255,255,255,.2)", border: "1px solid rgba(255,255,255,.3)", borderRadius: 4, padding: "2px 6px", color: "#fff", fontSize: 11, width: 150 }} />
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ opacity: 0.7 }}>Destino:</span>
+                          <input type="text" placeholder="Depósito" value={(rutaConfig[v.id] || {}).destino || ""} onClick={function (e) { e.stopPropagation(); }} onChange={function () { var vid = v.id; return function (e) { setRutaConfig(function (prev) { return { ...prev, [vid]: { ...(prev[vid] || {}), destino: e.target.value } }; }); }; }()} style={{ background: "rgba(255,255,255,.2)", border: "1px solid rgba(255,255,255,.3)", borderRadius: 4, padding: "2px 6px", color: "#fff", fontSize: 11, width: 150 }} />
+                        </div>
                       </div>
                     </div>
                     <div style={{ background: "#fff", borderRadius: "0 0 10px 10px", border: "1px solid #e2e8f0", borderTop: "none" }}>
