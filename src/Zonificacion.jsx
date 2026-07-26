@@ -231,7 +231,7 @@ export default function Zonificacion() {
           returnItems.push({...item, id: uid(), qty: item.qty - dQty});
         } else { returnItems.push({...item, id: uid()}); }
       }
-      updated[idx] = {...order, items: deliveredItems, status: "entregado"};
+      updated[idx] = {...order, items: deliveredItems, status: "entregado", parcial: returnItems.length > 0};
       if(returnItems.length > 0) {
         updated.push({...order, id: uid(), items: returnItems, vehicleId: null, status: "depurado"});
       }
@@ -402,6 +402,54 @@ export default function Zonificacion() {
     if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
   };
 
+  // Download zonificación as Word/PDF
+  const downloadZonificacion = (format) => {
+    const activeOrders = orders.filter(o => o.status !== "entregado" && o.status !== "rechazado");
+    const byZone = {};
+    for (const z of Object.keys(ZONES)) byZone[z] = [];
+    byZone["SIN ZONA"] = [];
+    for (const o of activeOrders) { const z = o.zone || "SIN ZONA"; if (!byZone[z]) byZone[z] = []; byZone[z].push(o); }
+
+    let body = "";
+    for (const [zone, zOrds] of Object.entries(byZone)) {
+      if (zOrds.length === 0) continue;
+      body += '<h2 style="font-size:14px;margin:16px 0 8px;border-bottom:1px solid #333;padding-bottom:4px;">'+zone+' ('+zOrds.length+' pedidos)</h2>';
+      for (const o of zOrds) {
+        const veh = VEHICLES.find(v => v.id === o.vehicleId);
+        const vehLabel = veh ? ' <span style="color:'+veh.color+';font-weight:700;">['+veh.name+']</span>' : '';
+        const depLabel = o.status === "depurado" ? ' <span style="color:#D97706;">(DEPURADO)</span>' : '';
+        const fecha = o.fecha ? o.fecha + ' ' : '';
+        body += '<div style="margin:6px 0;"><b>' + fecha + o.address.toUpperCase() + ' ' + (o.localidad||'').toUpperCase() + ' ' + (o.horario||'') + ' ' + (o.vendor||'') + '</b>' + vehLabel + depLabel + '</div>';
+        for (const item of o.items) {
+          const pStr = item.price ? ' $' + Number(item.price).toLocaleString('es-AR') : '';
+          const vStr = item.vendor && item.vendor !== o.vendor ? ' ' + item.vendor : '';
+          body += '<div style="padding-left:12px;font-size:11px;">- ' + item.qty + ' ' + item.product + pStr + vStr + '</div>';
+        }
+      }
+    }
+
+    const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Zonificación Pianyi</title>'
+      + '<style>body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:20px;}'
+      + 'h1{font-size:18px;margin-bottom:4px;}h2{font-size:14px;}'
+      + '@media print{body{padding:10px}}</style></head><body>'
+      + '<h1>ZONIFICACIÓN PIANYI</h1>'
+      + '<div style="color:#666;margin-bottom:12px;">Generado: ' + new Date().toLocaleDateString("es-AR") + ' — ' + activeOrders.length + ' pedidos activos</div>'
+      + body + '</body></html>';
+
+    if (format === "pdf") {
+      const w = window.open("", "_blank", "width=900,height=700");
+      if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 500); }
+    } else {
+      const blob = new Blob([html], { type: "application/msword" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Zonificacion_Pianyi_" + new Date().toISOString().slice(0,10) + ".doc";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
   const filteredZones = useMemo(() => {
     if(!searchTerm) return Object.keys(ZONES);
     const t=searchTerm.toLowerCase();
@@ -476,6 +524,28 @@ export default function Zonificacion() {
         <button style={S.btn("primary")} onClick={()=>setShowPaste(true)}>+ Pegar pedidos</button>
         {selectedOrders.size>0 && <button style={S.btn("success")} onClick={()=>setShowAssign(true)}>Asignar {selectedOrders.size} pedido{selectedOrders.size>1?"s":""}</button>}
         <button style={S.btn()} onClick={()=>setShowDebt(true)}>+ Cobro pendiente</button>
+        <button style={S.btn()} onClick={()=>downloadZonificacion("word")}>📄 Word</button>
+        <button style={S.btn()} onClick={()=>downloadZonificacion("pdf")}>📋 PDF</button>
+        <label style={{...S.btn(),cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4}}>
+          📂 Importar JSON
+          <input type="file" accept=".json" style={{display:"none"}} onChange={e=>{
+            const file=e.target.files[0]; if(!file)return;
+            const reader=new FileReader();
+            reader.onload=ev=>{
+              try{
+                const imported=JSON.parse(ev.target.result);
+                if(!Array.isArray(imported)){alert("El archivo no tiene formato válido.");return;}
+                const count=imported.length;
+                if(confirm("Se van a importar "+count+" pedidos. ¿Confirmar?")){
+                  setOrders(prev=>[...prev,...imported]);
+                  alert(count+" pedidos importados correctamente.");
+                }
+              }catch(err){alert("Error al leer el archivo: "+err.message);}
+            };
+            reader.readAsText(file);
+            e.target.value="";
+          }} />
+        </label>
         <input style={S.search} placeholder="Buscar dirección, localidad, producto..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
       </div>
       <div style={{padding:"8px 0"}}>
@@ -652,7 +722,7 @@ export default function Zonificacion() {
                     <div>
                       <div style={{fontWeight:500,fontSize:13}}>
                         {o.address} — {o.localidad}{" "}
-                        {o.status==="entregado"&&<span style={{color:"#059669",fontSize:11,fontWeight:700}}>✓ ENTREGADO</span>}
+                        {o.status==="entregado"&&<span style={{color:"#059669",fontSize:11,fontWeight:700}}>✓ {o.parcial?"ENTREGADO PARCIAL":"ENTREGADO"}</span>}
                         {o.status==="rechazado"&&<span style={{color:"#DC2626",fontSize:11,fontWeight:700}}>✗ RECHAZADO</span>}
                         {o.devuelto&&o.status==="pending"&&<span style={{color:"#D97706",fontSize:11,fontWeight:700}}>↩ DEVUELTO A ZONA</span>}
                       </div>
