@@ -79,11 +79,15 @@ function parseWhatsApp(text) {
     if (/^pas[oó]\s+/i.test(line)) continue;
     if (isVendorLine(line)) { if (cur) cur.vendor=resolveVendor(line); continue; }
     if (isSingleName(line) && cur && !hasStreet(line)) { cur.contactName=line; continue; }
-    if (startsQty(line) && cur) { const it=parseItem(line); if(it){it.vendor=cur.vendor||"";cur.items.push(it);} continue; }
+    // If we have a current order, try parsing as item FIRST (handles "1 247 lata $2175" etc)
+    if (cur) {
+      const it=parseItem(line);
+      if (it) { it.vendor=cur.vendor||""; cur.items.push(it); continue; }
+    }
     if (hasStreet(line)) {
       if (cur && cur.items.length>0) orders.push(cur);
       let addr=line,localidad="",horario="",vendor="";
-      const hm=addr.match(/(\d{1,2}(?::?\d{2})?)\s*a\s*(\d{1,2}(?::?\d{2})?)\s*(?:hs)?/i);
+      const hm=addr.match(/(\d{1,2}(?:[.:]\d{2})?)\s*[-aA]\s*(\d{1,2}(?:[.:]\d{2})?)\s*(?:hs)?/i);
       if(hm){horario=hm[0];addr=addr.replace(hm[0],"").trim();}
       addr=addr.replace(/^\d{1,2}\/\d{1,2}\s*/,"").trim();
       for(const[,bs]of Object.entries(ZONES)){for(const b of bs){const re=new RegExp(b.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");if(re.test(addr)){localidad=b;addr=addr.replace(re,"").trim();break;}}if(localidad)break;}
@@ -239,25 +243,15 @@ export default function Zonificacion() {
   // Automatic routing with Google
   function parseClosingTime(horario) {
     if (!horario) return 14;
-    const h = horario.toLowerCase().replace(/hs/g,"").replace(/\./g,":").trim();
-    // "no cierra" or "9 a 21" type = late closer
+    const h = horario.toLowerCase().replace(/hs/g,"").trim();
     if (h.includes("no cierra") || h.includes("corrido")) return 99;
-    // Find the closing part: "9 a 14" → 14, "9-13:30" → 13.5, "9 a 21" → 21
-    const match = h.match(/(?:a|-)[\s]*(\d{1,2})(?::(\d{2}))?/);
+    const match = h.match(/[-aA]\s*(\d{1,2})(?:[.:](\d{2}))?/);
     if (match) {
       const hr = parseInt(match[1]);
       const min = match[2] ? parseInt(match[2]) : 0;
-      const closeTime = hr + min/60;
-      // Handle "0930 a 14" style where first part is 0930
-      return closeTime > 0 ? closeTime : 14;
+      return hr + min/60;
     }
-    // Single number like "21" → treat as close time
-    const single = h.match(/(\d{1,2})(?::(\d{2}))?/);
-    if (single) {
-      const hr = parseInt(single[1]);
-      if (hr > 14) return hr;
-    }
-    return 14; // default
+    return 14;
   }
 
   function getCloseCategory(closeTime) {
