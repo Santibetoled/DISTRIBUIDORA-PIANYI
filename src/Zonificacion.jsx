@@ -178,6 +178,7 @@ export default function Zonificacion() {
   const [showDebt, setShowDebt] = useState(false);
   const [mergeInfo, setMergeInfo] = useState(null); // {conflicts, clean}
   const [newDebt, setNewDebt] = useState({client:"",address:"",localidad:"",amount:"",paid:""});
+  const [editingItem, setEditingItem] = useState(null); // {orderId, itemId, qty, price, product, vendor}
 
   /* ── Grouped data ── */
   const ordersByZone = useMemo(() => {
@@ -260,6 +261,24 @@ export default function Zonificacion() {
   const deleteOrder = (id) => setOrders(prev => prev.filter(o => o.id !== id));
   const deleteVehicle = (vid) => setOrders(prev => prev.filter(o => o.vehicleId !== vid));
   const returnToZone = (id) => setOrders(prev => prev.map(o => o.id===id ? {...o, status:"pending", vehicleId:null} : o));
+
+  const startEdit = (orderId, item) => setEditingItem({orderId, itemId:item.id, qty:item.qty, price:item.price, product:item.product, vendor:item.vendor||""});
+  const cancelEdit = () => setEditingItem(null);
+  const saveEdit = () => {
+    if (!editingItem) return;
+    setOrders(prev => prev.map(o => {
+      if (o.id !== editingItem.orderId) return o;
+      return {...o, items: o.items.map(it => it.id !== editingItem.itemId ? it : {...it, qty:parseInt(editingItem.qty)||1, price:parseFloat(editingItem.price)||0, product:editingItem.product, vendor:editingItem.vendor})};
+    }));
+    setEditingItem(null);
+  };
+  const deleteItem = (orderId, itemId) => {
+    setOrders(prev => prev.map(o => {
+      if (o.id !== orderId) return o;
+      const newItems = o.items.filter(it => it.id !== itemId);
+      return newItems.length > 0 ? {...o, items:newItems} : null;
+    }).filter(Boolean));
+  };
 
   const moveOrder = (vid, oid, dir) => {
     setOrders(prev => {
@@ -466,12 +485,33 @@ export default function Zonificacion() {
                             <span style={{color:"#DC2626",fontWeight:700,fontSize:14}}>{fmt(debt.amount-debt.paid)}</span>
                           </div>
                         )}
-                        {order.items.map(item => (
-                          <div key={item.id} style={S.itemRow}>
-                            <span><span style={{color:"#6B7280",marginRight:6}}>{item.qty}x</span>{item.product}{item.vendor && <span style={S.vtag(item.vendor)}>{item.vendor}</span>}</span>
-                            <span style={{color:"#6B7280"}}>{fmt(item.price)}</span>
-                          </div>
-                        ))}
+                        {order.items.map(item => {
+                          const isEditing = editingItem && editingItem.orderId===order.id && editingItem.itemId===item.id;
+                          if (isEditing) {
+                            return (
+                              <div key={item.id} style={{padding:"4px 0",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",fontSize:12}}>
+                                <input type="number" min={1} value={editingItem.qty} onChange={e=>setEditingItem(p=>({...p,qty:e.target.value}))} style={{width:45,padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12,textAlign:"center"}} />
+                                <input value={editingItem.product} onChange={e=>setEditingItem(p=>({...p,product:e.target.value}))} style={{flex:1,minWidth:100,padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12}} />
+                                <input type="number" value={editingItem.price} onChange={e=>setEditingItem(p=>({...p,price:e.target.value}))} style={{width:70,padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12,textAlign:"right"}} placeholder="$" />
+                                <select value={editingItem.vendor} onChange={e=>setEditingItem(p=>({...p,vendor:e.target.value}))} style={{padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12,background:"#F9FAFB"}}>
+                                  <option value="">Sin vendedor</option>
+                                  {VENDEDORES.map(v=><option key={v} value={v}>{v}</option>)}
+                                </select>
+                                <button onClick={saveEdit} style={{...S.btn("success"),padding:"3px 8px",fontSize:11}}>✓</button>
+                                <button onClick={cancelEdit} style={{...S.btn(),padding:"3px 8px",fontSize:11}}>✕</button>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div key={item.id} style={{...S.itemRow,cursor:"pointer"}} onClick={()=>startEdit(order.id,item)} title="Click para editar">
+                              <span><span style={{color:"#6B7280",marginRight:6}}>{item.qty}x</span>{item.product}{item.vendor && <span style={S.vtag(item.vendor)}>{item.vendor}</span>}</span>
+                              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                <span style={{color:"#6B7280"}}>{fmt(item.price)}</span>
+                                <button onClick={e=>{e.stopPropagation();deleteItem(order.id,item.id)}} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:11,padding:"0 2px"}}>✕</button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })}
