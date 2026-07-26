@@ -165,6 +165,7 @@ export default function Zonificacion() {
   };
   const toggleSelect = (id) => setSelectedOrders(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
   const deleteOrder = (id) => setOrders(prev=>prev.filter(o=>o.id!==id));
+  const unassignVehicle = (vid) => setOrders(prev=>prev.map(o=>o.vehicleId===vid&&(o.status==="preparando"||o.status==="en_calle")?{...o,vehicleId:null,status:"pending"}:o));
   const deleteVehicle = (vid) => setOrders(prev=>prev.filter(o=>o.vehicleId!==vid));
   const startEdit = (oid,item) => setEditingItem({orderId:oid,itemId:item.id,qty:item.qty,price:item.price,product:item.product,vendor:item.vendor||""});
   const cancelEdit = () => setEditingItem(null);
@@ -458,7 +459,7 @@ export default function Zonificacion() {
                 </div>
                 <div style={{display:"flex",gap:6}}>
                   <button style={S.btn("primary")} onClick={()=>printHDR(vid)}>🖨 Imprimir HDR</button>
-                  <button style={S.btn("danger")} onClick={()=>deleteVehicle(vid)}>Eliminar camioneta</button>
+                  <button style={S.btn("warning")} onClick={()=>unassignVehicle(vid)}>↩ Desasignar camioneta</button>
                 </div>
               </div>
               {vOrds.map((order,idx) => {
