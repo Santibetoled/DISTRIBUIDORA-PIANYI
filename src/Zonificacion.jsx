@@ -386,7 +386,7 @@ export default function Zonificacion() {
                     <div key={order.id} style={S.orderCard(veh?.color)}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
                         <div style={{display:"flex",alignItems:"center",gap:8}}>
-                          {!isAssigned && order.status==="pending" && <input type="checkbox" checked={selectedOrders.has(order.id)} onChange={()=>toggleSelect(order.id)} style={{accentColor:"#3B82F6"}} />}
+                          {!isAssigned && (order.status==="pending"||order.status==="depurado") && <input type="checkbox" checked={selectedOrders.has(order.id)} onChange={()=>toggleSelect(order.id)} style={{accentColor:"#3B82F6"}} />}
                           <div>
                             <div style={{fontWeight:600,fontSize:14}}>
                               {order.address}
