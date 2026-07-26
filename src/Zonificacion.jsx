@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 
 /* ── ZONES ── */
 const ZONES = {
@@ -212,35 +212,28 @@ export default function Zonificacion() {
 
   // Load data on mount
   useEffect(() => {
-    async function load() {
-      try {
-        const ordersRes = await window.storage.get("zonificacion:orders");
-        if (ordersRes) setOrders(JSON.parse(ordersRes.value));
-      } catch(e) { /* no saved orders yet */ }
-      try {
-        const debtsRes = await window.storage.get("zonificacion:debts");
-        if (debtsRes) setDebts(JSON.parse(debtsRes.value));
-        else setDebts(SAMPLE_DEBTS); // first time only
-      } catch(e) { setDebts(SAMPLE_DEBTS); }
-      setLoaded(true);
-    }
-    load();
+    try {
+      const savedOrders = localStorage.getItem("pianyi_zon_orders");
+      if (savedOrders) setOrders(JSON.parse(savedOrders));
+    } catch(e) {}
+    try {
+      const savedDebts = localStorage.getItem("pianyi_zon_debts");
+      if (savedDebts) setDebts(JSON.parse(savedDebts));
+      else setDebts(SAMPLE_DEBTS);
+    } catch(e) { setDebts(SAMPLE_DEBTS); }
+    setLoaded(true);
   }, []);
 
   // Auto-save orders when they change
   useEffect(() => {
     if (!loaded) return;
-    (async () => {
-      try { await window.storage.set("zonificacion:orders", JSON.stringify(orders)); } catch(e) { console.error("save orders failed", e); }
-    })();
+    try { localStorage.setItem("pianyi_zon_orders", JSON.stringify(orders)); } catch(e) {}
   }, [orders, loaded]);
 
   // Auto-save debts when they change
   useEffect(() => {
     if (!loaded) return;
-    (async () => {
-      try { await window.storage.set("zonificacion:debts", JSON.stringify(debts)); } catch(e) { console.error("save debts failed", e); }
-    })();
+    try { localStorage.setItem("pianyi_zon_debts", JSON.stringify(debts)); } catch(e) {}
   }, [debts, loaded]);
 
   /* ── Grouped data ── */
@@ -709,12 +702,12 @@ export default function Zonificacion() {
     );
   };
 
-  const handleReset = async () => {
+  const handleReset = () => {
     if (!confirm("¿Borrar TODOS los pedidos y cobros pendientes? Esta acción no se puede deshacer.")) return;
     setOrders([]);
     setDebts([]);
-    try { await window.storage.delete("zonificacion:orders"); } catch(e) {}
-    try { await window.storage.delete("zonificacion:debts"); } catch(e) {}
+    try { localStorage.removeItem("pianyi_zon_orders"); } catch(e) {}
+    try { localStorage.removeItem("pianyi_zon_debts"); } catch(e) {}
   };
 
   /* ── MAIN RENDER ── */
