@@ -18,6 +18,7 @@ const ZONES = {
 };
 const VENDEDORES = ["Alejandra","Benjamin","Santiago","Pianyi 1","Pianyi 2","Pianyi 3","Pianyi 4","Jeremias","Jose Costa","Mingo","Gerardo","Aly","Stella Fernandez","Ariel Tricariche"];
 const VENDOR_ALIASES = {"jeremías":"Jeremias","gera":"Gerardo","gerar":"Gerardo","ali":"Aly"};
+const LOCALITY_ALIASES = {"ramos":"Ramos Mejía","casanova":"Isidro Casanova","moron":"Morón","morón":"Morón","pompeya":"Nueva Pompeya","palomar":"El Palomar","tesei":"Villa Tesei","once":"Balvanera","lomas":"Lomas de Zamora","paternal":"La Paternal","devoto":"Villa Devoto","urquiza":"Villa Urquiza","pueyrredon":"Villa Pueyrredón","pueyrredón":"Villa Pueyrredón","lugano":"Villa Lugano","soldati":"Villa Soldati","crespo":"Villa Crespo","mirador":"Lomas del Mirador","madero":"Villa Madero","tablada":"La Tablada","celina":"Villa Celina","dominico":"Villa Dominico","sarsfield":"Vélez Sarsfield"};
 const VEHICLES = [
   {id:"t1",name:"Transit 1",color:"#3B82F6"},{id:"t2",name:"Transit 2",color:"#10B981"},
   {id:"t3",name:"Transit 3",color:"#F59E0B"},{id:"t4",name:"Transit 4",color:"#EF4444"},
@@ -102,6 +103,8 @@ function parseWhatsApp(text) {
       let foundAfter=false;
       for(const[,bs]of Object.entries(ZONES)){for(const b of bs){const bStrip=stripAcc(b);const re=new RegExp(bStrip.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");if(re.test(afterNumStrip)){localidad=b;addr=addr.slice(0,numPos+(numMatch?numMatch[0].length:0))+afterNum.replace(new RegExp(bStrip.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i"),"");addr=addr.trim();foundAfter=true;break;}}if(localidad)break;}
       if(!foundAfter){const addrStrip=stripAcc(addr);for(const[,bs]of Object.entries(ZONES)){for(const b of bs){const bStrip=stripAcc(b);const re=new RegExp(bStrip.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");if(re.test(addrStrip)){localidad=b;addr=stripAcc(addr).replace(re,"").trim();break;}}if(localidad)break;}}
+      // Alias fallback: "ramos" → "Ramos Mejía", "casanova" → "Isidro Casanova", etc
+      if(!localidad){const addrLow=stripAcc(addr).toLowerCase();for(const[alias,full]of Object.entries(LOCALITY_ALIASES)){if(addrLow.includes(alias)){localidad=full;addr=addr.replace(new RegExp(alias,"i"),"").trim();break;}}}
       // Extract vendor
       for(const v of VENDEDORES){const re=new RegExp(v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");if(re.test(addr)){vendor=v;addr=addr.replace(re,"").trim();}}
       if(!vendor){const al=Object.keys(VENDOR_ALIASES);for(const a of al){const re=new RegExp("\\b"+a+"\\b","i");if(re.test(addr)){vendor=VENDOR_ALIASES[a];addr=addr.replace(re,"").trim();}}}
@@ -185,7 +188,15 @@ export default function Zonificacion() {
     const conflicts=[],clean=[];
     for(const p of parsed){const k=normalizeAddr(p.address);const ex=orders.find(o=>normalizeAddr(o.address)===k&&o.status==="pending");if(ex)conflicts.push({existingId:ex.id,merged:mergeItems(ex.items,p.items)});else clean.push(p);}
     if(conflicts.length>0){setMergeInfo({conflicts,clean});}
-    else{setOrders(prev=>[...prev,...clean]);setParseResult(clean.length+" pedido"+(clean.length>1?"s":"")+" cargado"+(clean.length>1?"s":""));setPasteText("");setTimeout(()=>{setShowPaste(false);setParseResult(null);},1200);}
+    else{
+      // Alert for orders without horario
+      const sinHorario=clean.filter(o=>!o.horario);
+      if(sinHorario.length>0){
+        const dirs=sinHorario.map(o=>o.address).join(", ");
+        if(!confirm("⚠ "+sinHorario.length+" pedido"+(sinHorario.length>1?"s":"")+" sin horario: "+dirs+"\n\nSi no se agrega horario, se considerará cierre 13:30hs para el ruteo.\n\n¿Cargar igual?")){return;}
+      }
+      setOrders(prev=>[...prev,...clean]);setParseResult(clean.length+" pedido"+(clean.length>1?"s":"")+" cargado"+(clean.length>1?"s":""));setPasteText("");setTimeout(()=>{setShowPaste(false);setParseResult(null);},1200);
+    }
   };
   const handleConfirmMerge = () => {
     if(!mergeInfo)return;
@@ -256,7 +267,7 @@ export default function Zonificacion() {
 
   // Automatic routing with Google
   function parseClosingTime(horario) {
-    if (!horario) return 14;
+    if (!horario) return 13.5; // sin horario = cierra 13:30
     const h = horario.toLowerCase().replace(/hs/g,"").trim();
     if (h.includes("no cierra") || h.includes("corrido")) return 99;
     const match = h.match(/[-aA]\s*(\d{1,2})(?:[.:](\d{2}))?/);
