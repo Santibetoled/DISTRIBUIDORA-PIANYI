@@ -22,7 +22,7 @@ const VENDEDORES = ["Jose Costa", "Pianyi 1", "Pianyi 4", "Benjamin"];
 const VEHICLES = [
   { id: "t1", name: "Transit 1", color: "#3B82F6" },
   { id: "t2", name: "Transit 2", color: "#10B981" },
-  { id: "t3", name: "Transit 3", color: "#F59E0B" },
+  { id: "t3", name: "Transit 3", color: "#D97706" },
   { id: "t4", name: "Transit 4", color: "#EF4444" },
   { id: "t5", name: "Transit 5", color: "#8B5CF6" },
   { id: "rb", name: "Ranger Beto", color: "#EC4899" },
@@ -323,45 +323,45 @@ export default function Zonificacion() {
   const fmt = (n) => "$" + n.toLocaleString("es-AR");
 
   const styles = {
-    app: { fontFamily: "'Inter', -apple-system, sans-serif", background: "#0F1117", color: "#E2E4E9", minHeight: "100vh" },
-    header: { padding: "16px 20px", borderBottom: "1px solid #1E2028", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 },
-    logo: { fontSize: 20, fontWeight: 700, color: "#fff", letterSpacing: "-0.5px" },
-    tabs: { display: "flex", gap: 4, background: "#1A1C24", borderRadius: 8, padding: 3 },
-    tab: (active) => ({ padding: "8px 16px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 500, background: active ? "#2A2D38" : "transparent", color: active ? "#fff" : "#8B8D97", transition: "all 0.15s" }),
-    toolbar: { padding: "12px 20px", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderBottom: "1px solid #1E2028" },
+    app: { fontFamily: "'Inter', -apple-system, sans-serif", background: "#FFFFFF", color: "#1A1A2E", minHeight: "100vh" },
+    header: { padding: "16px 20px", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 },
+    logo: { fontSize: 20, fontWeight: 700, color: "#1A1A2E", letterSpacing: "-0.5px" },
+    tabs: { display: "flex", gap: 4, background: "#F3F4F6", borderRadius: 8, padding: 3 },
+    tab: (active) => ({ padding: "8px 16px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 500, background: active ? "#fff" : "transparent", color: active ? "#1A1A2E" : "#6B7280", transition: "all 0.15s", boxShadow: active ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }),
+    toolbar: { padding: "12px 20px", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderBottom: "1px solid #E5E7EB" },
     btn: (variant) => ({
       padding: "8px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
       ...(variant === "primary" ? { background: "#3B82F6", color: "#fff" } :
         variant === "danger" ? { background: "#DC2626", color: "#fff" } :
         variant === "success" ? { background: "#059669", color: "#fff" } :
         variant === "warning" ? { background: "#D97706", color: "#fff" } :
-        { background: "#2A2D38", color: "#C5C7CD" })
+        { background: "#F3F4F6", color: "#374151", border: "1px solid #D1D5DB" })
     }),
-    searchInput: { padding: "8px 12px", borderRadius: 6, border: "1px solid #2A2D38", background: "#1A1C24", color: "#E2E4E9", fontSize: 13, flex: 1, minWidth: 200, outline: "none" },
-    zone: { margin: "0 12px 8px", borderRadius: 8, overflow: "hidden", border: "1px solid #1E2028" },
-    zoneHeader: (hasOrders) => ({ padding: "10px 16px", background: hasOrders ? "#1A1C24" : "#15161D", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", userSelect: "none" }),
-    zoneName: { fontWeight: 600, fontSize: 14 },
+    searchInput: { padding: "8px 12px", borderRadius: 6, border: "1px solid #D1D5DB", background: "#FFFFFF", color: "#1A1A2E", fontSize: 13, flex: 1, minWidth: 200, outline: "none" },
+    zone: { margin: "0 12px 8px", borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB" },
+    zoneHeader: (hasOrders) => ({ padding: "10px 16px", background: hasOrders ? "#F9FAFB" : "#FAFAFA", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", userSelect: "none" }),
+    zoneName: { fontWeight: 600, fontSize: 14, color: "#1A1A2E" },
     badge: (color) => ({ background: color || "#3B82F6", color: "#fff", padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 700 }),
     orderCard: (vehicleColor) => ({
-      padding: "10px 16px", borderBottom: "1px solid #1E2028", background: vehicleColor ? `${vehicleColor}12` : "#13141B",
+      padding: "10px 16px", borderBottom: "1px solid #E5E7EB", background: vehicleColor ? `${vehicleColor}08` : "#FFFFFF",
       borderLeft: vehicleColor ? `3px solid ${vehicleColor}` : "3px solid transparent",
     }),
     itemRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0", fontSize: 13 },
-    debtRow: { background: "#DC262615", borderLeft: "3px solid #DC2626", padding: "10px 16px", borderBottom: "1px solid #1E2028" },
+    debtRow: { background: "#FEF2F2", borderLeft: "3px solid #DC2626", padding: "10px 16px", borderBottom: "1px solid #E5E7EB" },
     debtBadge: { background: "#DC2626", color: "#fff", padding: "3px 10px", borderRadius: 4, fontSize: 11, fontWeight: 700, letterSpacing: "0.5px" },
-    debtGroupHeader: { padding: "6px 16px", background: "#DC262610", borderBottom: "1px solid #1E2028", fontSize: 12, fontWeight: 600, color: "#F87171" },
-    modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16 },
-    modalContent: { background: "#1A1C24", borderRadius: 12, padding: 24, maxWidth: 600, width: "100%", maxHeight: "80vh", overflow: "auto", border: "1px solid #2A2D38" },
-    textarea: { width: "100%", minHeight: 200, background: "#0F1117", color: "#E2E4E9", border: "1px solid #2A2D38", borderRadius: 8, padding: 12, fontSize: 13, fontFamily: "monospace", resize: "vertical", outline: "none", boxSizing: "border-box" },
-    input: { padding: "8px 12px", borderRadius: 6, border: "1px solid #2A2D38", background: "#0F1117", color: "#E2E4E9", fontSize: 13, width: "100%", outline: "none", boxSizing: "border-box" },
-    vehicleCard: (color) => ({ padding: "12px 16px", margin: "0 12px 8px", borderRadius: 8, border: `1px solid ${color}40`, background: `${color}08`, borderLeft: `4px solid ${color}` }),
-    reportSection: { margin: "0 12px 12px", borderRadius: 8, border: "1px solid #1E2028", overflow: "hidden" },
+    debtGroupHeader: { padding: "6px 16px", background: "#FEF2F2", borderBottom: "1px solid #E5E7EB", fontSize: 12, fontWeight: 600, color: "#DC2626" },
+    modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16 },
+    modalContent: { background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 600, width: "100%", maxHeight: "80vh", overflow: "auto", border: "1px solid #E5E7EB", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" },
+    textarea: { width: "100%", minHeight: 200, background: "#F9FAFB", color: "#1A1A2E", border: "1px solid #D1D5DB", borderRadius: 8, padding: 12, fontSize: 13, fontFamily: "monospace", resize: "vertical", outline: "none", boxSizing: "border-box" },
+    input: { padding: "8px 12px", borderRadius: 6, border: "1px solid #D1D5DB", background: "#F9FAFB", color: "#1A1A2E", fontSize: 13, width: "100%", outline: "none", boxSizing: "border-box" },
+    vehicleCard: (color) => ({ padding: "12px 16px", margin: "0 12px 8px", borderRadius: 8, border: `1px solid ${color}30`, background: `${color}06`, borderLeft: `4px solid ${color}` }),
+    reportSection: { margin: "0 12px 12px", borderRadius: 8, border: "1px solid #E5E7EB", overflow: "hidden" },
     vendorTag: (vendor) => {
-      const colors = { "Jose Costa": "#F59E0B", "Pianyi 1": "#3B82F6", "Pianyi 4": "#8B5CF6", "Benjamin": "#10B981" };
+      const colors = { "Jose Costa": "#D97706", "Pianyi 1": "#2563EB", "Pianyi 4": "#7C3AED", "Benjamin": "#059669" };
       const c = colors[vendor] || "#6B7280";
-      return { fontSize: 11, color: c, fontWeight: 600, marginLeft: 8, padding: "1px 6px", borderRadius: 4, background: `${c}18` };
+      return { fontSize: 11, color: c, fontWeight: 600, marginLeft: 8, padding: "1px 6px", borderRadius: 4, background: `${c}12` };
     },
-    select: { padding: "8px 12px", borderRadius: 6, border: "1px solid #2A2D38", background: "#0F1117", color: "#E2E4E9", fontSize: 13, outline: "none" },
+    select: { padding: "8px 12px", borderRadius: 6, border: "1px solid #D1D5DB", background: "#F9FAFB", color: "#1A1A2E", fontSize: 13, outline: "none" },
   };
 
   const renderZonificacion = () => (
@@ -431,9 +431,9 @@ export default function Zonificacion() {
                             )}
                             <div>
                               <div style={{ fontWeight: 600, fontSize: 14 }}>{order.address}</div>
-                              <div style={{ fontSize: 12, color: "#8B8D97" }}>
+                              <div style={{ fontSize: 12, color: "#6B7280" }}>
                                 {order.localidad}{order.horario ? ` • ${order.horario}` : ""}
-                                {order.status === "depurado" && <span style={{ color: "#F59E0B", marginLeft: 8 }}>DEPURADO</span>}
+                                {order.status === "depurado" && <span style={{ color: "#D97706", marginLeft: 8 }}>DEPURADO</span>}
                               </div>
                             </div>
                           </div>
@@ -443,20 +443,20 @@ export default function Zonificacion() {
                         </div>
 
                         {matchingDebt && (
-                          <div style={{ background: "#DC262618", border: "1px solid #DC262640", borderRadius: 6, padding: "6px 10px", marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 6, padding: "6px 10px", marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                             <span style={styles.debtBadge}>DEUDA PENDIENTE DE PAGO</span>
-                            <span style={{ color: "#F87171", fontWeight: 700, fontSize: 14 }}>{fmt(matchingDebt.amount - matchingDebt.paid)}</span>
+                            <span style={{ color: "#DC2626", fontWeight: 700, fontSize: 14 }}>{fmt(matchingDebt.amount - matchingDebt.paid)}</span>
                           </div>
                         )}
 
                         {order.items.map(item => (
                           <div key={item.id} style={styles.itemRow}>
                             <span>
-                              <span style={{ color: "#8B8D97", marginRight: 6 }}>{item.qty}x</span>
+                              <span style={{ color: "#6B7280", marginRight: 6 }}>{item.qty}x</span>
                               {item.product}
                               {item.vendor && <span style={styles.vendorTag(item.vendor)}>{item.vendor}</span>}
                             </span>
-                            <span style={{ color: "#9CA3AF" }}>{fmt(item.price)}</span>
+                            <span style={{ color: "#6B7280" }}>{fmt(item.price)}</span>
                           </div>
                         ))}
                       </div>
@@ -471,15 +471,15 @@ export default function Zonificacion() {
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                             <div>
                               <div style={{ fontWeight: 600, fontSize: 14 }}>{debt.client}</div>
-                              <div style={{ fontSize: 12, color: "#8B8D97" }}>{debt.address} • {debt.localidad}</div>
+                              <div style={{ fontSize: 12, color: "#6B7280" }}>{debt.address} • {debt.localidad}</div>
                             </div>
                             <div style={{ textAlign: "right", display: "flex", alignItems: "center", gap: 8 }}>
                               <div>
                                 <span style={styles.debtBadge}>DEUDA PENDIENTE DE PAGO</span>
-                                <div style={{ color: "#F87171", fontWeight: 700, fontSize: 16, marginTop: 4 }}>
+                                <div style={{ color: "#DC2626", fontWeight: 700, fontSize: 16, marginTop: 4 }}>
                                   {fmt(debt.amount - debt.paid)}
                                 </div>
-                                {debt.paid > 0 && <div style={{ fontSize: 11, color: "#8B8D97" }}>Pagó parcial: {fmt(debt.paid)}</div>}
+                                {debt.paid > 0 && <div style={{ fontSize: 11, color: "#6B7280" }}>Pagó parcial: {fmt(debt.paid)}</div>}
                               </div>
                               <button onClick={() => handleDeleteDebt(debt.id)} style={{ ...styles.btn("danger"), padding: "4px 8px", fontSize: 11 }}>✕</button>
                             </div>
@@ -521,11 +521,11 @@ export default function Zonificacion() {
                 </div>
               </div>
               {vOrders.map(order => (
-                <div key={order.id} style={{ padding: "8px 0", borderTop: "1px solid #ffffff10" }}>
+                <div key={order.id} style={{ padding: "8px 0", borderTop: "1px solid #E5E7EB" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{order.address}</div>
-                      <div style={{ fontSize: 12, color: "#8B8D97" }}>{order.localidad}{order.horario ? ` • ${order.horario}` : ""}</div>
+                      <div style={{ fontSize: 12, color: "#6B7280" }}>{order.localidad}{order.horario ? ` • ${order.horario}` : ""}</div>
                     </div>
                     <div style={{ display: "flex", gap: 4 }}>
                       <button onClick={() => handleReturnToZone(order.id)} style={{ ...styles.btn(), padding: "4px 8px", fontSize: 11 }}>↩ Volver</button>
@@ -535,10 +535,10 @@ export default function Zonificacion() {
                   {order.items.map(item => (
                     <div key={item.id} style={{ ...styles.itemRow, paddingLeft: 8 }}>
                       <span>
-                        <span style={{ color: "#8B8D97" }}>{item.qty}x</span> {item.product}
+                        <span style={{ color: "#6B7280" }}>{item.qty}x</span> {item.product}
                         {item.vendor && <span style={styles.vendorTag(item.vendor)}>{item.vendor}</span>}
                       </span>
-                      <span style={{ color: "#9CA3AF" }}>{fmt(item.price)}</span>
+                      <span style={{ color: "#6B7280" }}>{fmt(item.price)}</span>
                     </div>
                   ))}
                 </div>
@@ -561,7 +561,7 @@ export default function Zonificacion() {
 
     return (
       <div style={{ padding: "12px 0" }}>
-        <div style={{ padding: "0 20px 12px", fontSize: 13, color: "#8B8D97" }}>
+        <div style={{ padding: "0 20px 12px", fontSize: 13, color: "#6B7280" }}>
           Reporte segmentado por camioneta — eliminá pedidos individuales o camionetas completas
         </div>
         {Object.keys(byVehicle).length === 0 ? (
@@ -571,7 +571,7 @@ export default function Zonificacion() {
             const vehicle = VEHICLES.find(v => v.id === vId);
             return (
               <div key={vId} style={styles.reportSection}>
-                <div style={{ padding: "10px 16px", background: "#1A1C24", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ padding: "10px 16px", background: "#F3F4F6", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span style={{ fontWeight: 700, fontSize: 15 }}>{vehicle?.name || "Sin asignar"}</span>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     <span style={styles.badge(vehicle?.color)}>{vOrders.length}</span>
@@ -579,10 +579,10 @@ export default function Zonificacion() {
                   </div>
                 </div>
                 {vOrders.map(order => (
-                  <div key={order.id} style={{ padding: "8px 16px", borderTop: "1px solid #1E2028", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div key={order.id} style={{ padding: "8px 16px", borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
                       <div style={{ fontWeight: 500, fontSize: 13 }}>{order.address} — {order.localidad}</div>
-                      <div style={{ fontSize: 12, color: "#8B8D97" }}>{order.items.length} artículo{order.items.length > 1 ? "s" : ""}</div>
+                      <div style={{ fontSize: 12, color: "#6B7280" }}>{order.items.length} artículo{order.items.length > 1 ? "s" : ""}</div>
                     </div>
                     <button onClick={() => handleDeleteOrder(order.id)} style={{ ...styles.btn("danger"), padding: "4px 8px", fontSize: 11 }}>✕</button>
                   </div>
@@ -615,7 +615,7 @@ export default function Zonificacion() {
         <div style={styles.modal} onClick={() => setShowPasteModal(false)}>
           <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
             <h3 style={{ margin: "0 0 12px", fontSize: 18 }}>Pegar pedidos de WhatsApp</h3>
-            <p style={{ fontSize: 13, color: "#8B8D97", margin: "0 0 12px" }}>
+            <p style={{ fontSize: 13, color: "#6B7280", margin: "0 0 12px" }}>
               Pegá los pedidos directamente del grupo. El sistema detecta dirección, localidad, horario, vendedor y artículos.
             </p>
             <textarea
@@ -637,21 +637,21 @@ export default function Zonificacion() {
       {mergeConflicts.length > 0 && (
         <div style={styles.modal}>
           <div style={styles.modalContent}>
-            <h3 style={{ margin: "0 0 12px", fontSize: 18, color: "#F59E0B" }}>Pedidos duplicados detectados</h3>
-            <p style={{ fontSize: 13, color: "#8B8D97", margin: "0 0 16px" }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 18, color: "#D97706" }}>Pedidos duplicados detectados</h3>
+            <p style={{ fontSize: 13, color: "#6B7280", margin: "0 0 16px" }}>
               Se encontraron {mergeConflicts.length} cliente{mergeConflicts.length > 1 ? "s" : ""} con pedidos existentes. Se fusionarán con la lógica: cantidad más alta + precio más alto, asignando vendedor ganador.
             </p>
             {mergeConflicts.map((c, i) => (
-              <div key={i} style={{ padding: 12, background: "#0F1117", borderRadius: 8, marginBottom: 8, border: "1px solid #2A2D38" }}>
+              <div key={i} style={{ padding: 12, background: "#F9FAFB", borderRadius: 8, marginBottom: 8, border: "1px solid #D1D5DB" }}>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>{c.existing.address}</div>
-                <div style={{ fontSize: 12, color: "#8B8D97", marginBottom: 4 }}>Resultado fusionado:</div>
+                <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}>Resultado fusionado:</div>
                 {c.merged.map(item => (
                   <div key={item.id} style={styles.itemRow}>
                     <span>
                       {item.qty}x {item.product}
                       {item.vendor && <span style={styles.vendorTag(item.vendor)}>{item.vendor}</span>}
                     </span>
-                    <span style={{ color: "#9CA3AF" }}>{fmt(item.price)}</span>
+                    <span style={{ color: "#6B7280" }}>{fmt(item.price)}</span>
                   </div>
                 ))}
               </div>
@@ -677,7 +677,7 @@ export default function Zonificacion() {
                   style={{ ...styles.btn(), padding: "12px 16px", textAlign: "left", borderLeft: `4px solid ${v.color}`, display: "flex", justifyContent: "space-between" }}
                 >
                   <span style={{ fontWeight: 600 }}>{v.name}</span>
-                  <span style={{ color: "#8B8D97" }}>{(streetByVehicle[v.id] || []).length} pedidos asignados</span>
+                  <span style={{ color: "#6B7280" }}>{(streetByVehicle[v.id] || []).length} pedidos asignados</span>
                 </button>
               ))}
             </div>
