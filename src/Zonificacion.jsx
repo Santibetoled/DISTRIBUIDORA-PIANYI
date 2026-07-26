@@ -39,6 +39,7 @@ function normalizeAddr(a) {
   const m = s.match(/([a-záéíóúüñ\s]+)\s+(\d{1,5})/);
   return m ? (m[1].trim()+" "+m[2]) : s;
 }
+function stripAcc(s){return s.normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
 function normProd(n) { return n.trim().toLowerCase().replace(/\s+/g," "); }
 function mergeItems(ex, inc) {
   const r = ex.map(i=>({...i}));
@@ -86,15 +87,28 @@ function parseWhatsApp(text) {
     }
     if (hasStreet(line)) {
       if (cur && cur.items.length>0) orders.push(cur);
-      let addr=line,localidad="",horario="",vendor="";
+      let addr=line,localidad="",horario="",vendor="",fecha="";
+      // Extract horario
       const hm=addr.match(/(\d{1,2}(?:[.:]\d{2})?)\s*[-aA]\s*(\d{1,2}(?:[.:]\d{2})?)\s*(?:hs)?/i);
       if(hm){horario=hm[0];addr=addr.replace(hm[0],"").trim();}
-      addr=addr.replace(/^\d{1,2}\/\d{1,2}\s*/,"").trim();
-      for(const[,bs]of Object.entries(ZONES)){for(const b of bs){const re=new RegExp(b.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");if(re.test(addr)){localidad=b;addr=addr.replace(re,"").trim();break;}}if(localidad)break;}
+      // Extract fecha (leading date like "24/7" or "23-6")
+      const fm=addr.match(/^(\d{1,2}[/-]\d{1,2})\s*/);
+      if(fm){fecha=fm[1];addr=addr.replace(fm[0],"").trim();}
+      // Extract localidad: search AFTER the street number first (accent-insensitive)
+      const numPos=addr.search(/\d{3,5}/);
+      const numMatch=addr.match(/\d{3,5}/);
+      const afterNum=numMatch?addr.slice(numPos+numMatch[0].length):"";
+      const afterNumStrip=stripAcc(afterNum);
+      let foundAfter=false;
+      for(const[,bs]of Object.entries(ZONES)){for(const b of bs){const bStrip=stripAcc(b);const re=new RegExp(bStrip.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");if(re.test(afterNumStrip)){localidad=b;addr=addr.slice(0,numPos+(numMatch?numMatch[0].length:0))+afterNum.replace(new RegExp(bStrip.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i"),"");addr=addr.trim();foundAfter=true;break;}}if(localidad)break;}
+      if(!foundAfter){const addrStrip=stripAcc(addr);for(const[,bs]of Object.entries(ZONES)){for(const b of bs){const bStrip=stripAcc(b);const re=new RegExp(bStrip.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");if(re.test(addrStrip)){localidad=b;addr=stripAcc(addr).replace(re,"").trim();break;}}if(localidad)break;}}
+      // Extract vendor
       for(const v of VENDEDORES){const re=new RegExp(v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");if(re.test(addr)){vendor=v;addr=addr.replace(re,"").trim();}}
       if(!vendor){const al=Object.keys(VENDOR_ALIASES);for(const a of al){const re=new RegExp("\\b"+a+"\\b","i");if(re.test(addr)){vendor=VENDOR_ALIASES[a];addr=addr.replace(re,"").trim();}}}
       addr=addr.replace(/[,\s]+$/,"").replace(/^\s*[,\s]+/,"").replace(/\s+/g," ").trim();
-      cur={id:uid(),address:addr||line,localidad,zone:findZone(localidad)||"SIN ZONA",horario,vendor,items:[],vehicleId:null,status:"pending",contactName:""};
+      // If no fecha, use today
+      if(!fecha){const d=new Date();fecha=(d.getDate())+"/"+(d.getMonth()+1);}
+      cur={id:uid(),address:addr||line,localidad,zone:findZone(localidad)||"SIN ZONA",horario,vendor,fecha,items:[],vehicleId:null,status:"pending",contactName:""};
     }
   }
   if(cur&&cur.items.length>0)orders.push(cur);
@@ -582,6 +596,7 @@ export default function Zonificacion() {
                           {!isAssigned && (order.status==="pending"||order.status==="depurado") && <input type="checkbox" checked={selectedOrders.has(order.id)} onChange={()=>toggleSelect(order.id)} style={{accentColor:"#3B82F6"}} />}
                           <div>
                             <div style={{fontWeight:600,fontSize:14}}>
+                              {order.fecha && <span style={{color:"#6B7280",fontWeight:400,fontSize:12,marginRight:6}}>{order.fecha}</span>}
                               {order.address}
                               {isAssigned && <span style={{...S.badge(veh?.color),marginLeft:8,fontSize:10}}>{veh?.name}</span>}
                             </div>
