@@ -123,6 +123,7 @@ export default function Zonificacion() {
   const [editingItem, setEditingItem] = useState(null);
   const [depuratingOrder, setDepuratingOrder] = useState(null);
   const [parseResult, setParseResult] = useState(null);
+  const [motivoModal, setMotivoModal] = useState(null); // {orderId, action:"rechazado"|"devuelto", motivo:""}
 
   useEffect(() => {
     try { const s=localStorage.getItem("pianyi_zon_orders"); if(s) setOrders(JSON.parse(s)); } catch(e){}
@@ -165,7 +166,6 @@ export default function Zonificacion() {
   const toggleSelect = (id) => setSelectedOrders(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
   const deleteOrder = (id) => setOrders(prev=>prev.filter(o=>o.id!==id));
   const deleteVehicle = (vid) => setOrders(prev=>prev.filter(o=>o.vehicleId!==vid));
-  const returnToZone = (id) => setOrders(prev=>prev.map(o=>o.id===id?{...o,status:"pending",vehicleId:null}:o));
   const startEdit = (oid,item) => setEditingItem({orderId:oid,itemId:item.id,qty:item.qty,price:item.price,product:item.product,vendor:item.vendor||""});
   const cancelEdit = () => setEditingItem(null);
   const saveEdit = () => {
@@ -184,8 +184,18 @@ export default function Zonificacion() {
 
   // Depuration handlers
   const depurateTotal = (id) => setOrders(prev=>prev.map(o=>o.id===id?{...o,status:"entregado"}:o));
-  const depurateReject = (id) => setOrders(prev=>prev.map(o=>o.id===id?{...o,status:"pending",vehicleId:null}:o));
-  const depuratePartialConfirm = (oid, deliveredMap) => {
+  const depurateReject = (id) => setMotivoModal({orderId:id, action:"rechazado", motivo:""});
+  const returnToZoneStart = (id) => setMotivoModal({orderId:id, action:"devuelto", motivo:""});
+  const confirmMotivo = () => {
+    if(!motivoModal) return;
+    const {orderId, action, motivo} = motivoModal;
+    if(action==="rechazado") {
+      setOrders(prev=>prev.map(o=>o.id===orderId?{...o, status:"rechazado", motivo: motivo||"Sin motivo", vehicleId:o.vehicleId}:o));
+    } else {
+      setOrders(prev=>prev.map(o=>o.id===orderId?{...o, status:"pending", vehicleId:null, motivo: motivo||"Sin motivo", devuelto:true}:o));
+    }
+    setMotivoModal(null);
+  };  const depuratePartialConfirm = (oid, deliveredMap) => {
     setOrders(prev => {
       const updated = [...prev];
       const idx = updated.findIndex(o=>o.id===oid);
@@ -358,7 +368,7 @@ export default function Zonificacion() {
       <div style={{padding:"8px 0"}}>
         {filteredZones.map(zone => {
           const allOrds = (ordersByZone[zone]||[]).filter(o => {
-            if(o.status==="entregado") return false;
+            if(o.status==="entregado"||o.status==="rechazado") return false;
             if(!searchTerm) return true;
             const t=searchTerm.toLowerCase();
             return o.address.toLowerCase().includes(t)||o.localidad.toLowerCase().includes(t)||o.items.some(it=>it.product.toLowerCase().includes(t));
@@ -471,7 +481,7 @@ export default function Zonificacion() {
                       <button onClick={()=>depurateTotal(order.id)} style={{...S.btn("success"),padding:"4px 8px",fontSize:11}}>✓ Entregado</button>
                       <button onClick={()=>setDepuratingOrder(isDepurating?null:{id:order.id,items:Object.fromEntries(order.items.map(i=>[i.id,i.qty]))})} style={{...S.btn("warning"),padding:"4px 8px",fontSize:11}}>{isDepurating?"Cancelar":"Parcial"}</button>
                       <button onClick={()=>depurateReject(order.id)} style={{...S.btn(),padding:"4px 8px",fontSize:11}}>✗ Rechazo</button>
-                      <button onClick={()=>returnToZone(order.id)} style={{...S.btn(),padding:"4px 8px",fontSize:11}}>↩ Volver</button>
+                      <button onClick={()=>returnToZoneStart(order.id)} style={{...S.btn(),padding:"4px 8px",fontSize:11}}>↩ Volver</button>
                     </div>
                   </div>
                   {isDepurating ? (
@@ -507,7 +517,7 @@ export default function Zonificacion() {
   // REPORTE TAB
   const renderReporte = () => {
     const byV={};
-    for(const o of orders) if(o.vehicleId&&(o.status==="preparando"||o.status==="en_calle"||o.status==="entregado")) (byV[o.vehicleId]||(byV[o.vehicleId]=[])).push(o);
+    for(const o of orders) if(o.vehicleId&&(o.status==="preparando"||o.status==="en_calle"||o.status==="entregado"||o.status==="rechazado"||(o.status==="pending"&&o.devuelto))) (byV[o.vehicleId]||(byV[o.vehicleId]=[])).push(o);
     return (
       <div style={{padding:"12px 0"}}>
         <div style={{padding:"0 20px 12px",fontSize:13,color:"#6B7280"}}>Reporte segmentado por camioneta</div>
@@ -524,10 +534,15 @@ export default function Zonificacion() {
                   </div>
                 </div>
                 {vOrds.map(o=>(
-                  <div key={o.id} style={{padding:"8px 16px",borderTop:"1px solid #E5E7EB",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div key={o.id} style={{padding:"8px 16px",borderTop:"1px solid #E5E7EB",display:"flex",justifyContent:"space-between",alignItems:"center",background:o.status==="rechazado"?"#FEF2F2":o.devuelto?"#FFFBEB":"transparent"}}>
                     <div>
-                      <div style={{fontWeight:500,fontSize:13}}>{o.address} — {o.localidad} {o.status==="entregado"&&<span style={{color:"#059669",fontSize:11,fontWeight:700}}>✓ ENTREGADO</span>}{o.status==="depurado"&&<span style={{color:"#D97706",fontSize:11,fontWeight:700}}>DEPURADO</span>}</div>
-                      <div style={{fontSize:12,color:"#6B7280"}}>{o.items.length} artículo{o.items.length>1?"s":""}</div>
+                      <div style={{fontWeight:500,fontSize:13}}>
+                        {o.address} — {o.localidad}{" "}
+                        {o.status==="entregado"&&<span style={{color:"#059669",fontSize:11,fontWeight:700}}>✓ ENTREGADO</span>}
+                        {o.status==="rechazado"&&<span style={{color:"#DC2626",fontSize:11,fontWeight:700}}>✗ RECHAZADO</span>}
+                        {o.devuelto&&o.status==="pending"&&<span style={{color:"#D97706",fontSize:11,fontWeight:700}}>↩ DEVUELTO A ZONA</span>}
+                      </div>
+                      <div style={{fontSize:12,color:"#6B7280"}}>{o.items.length} artículo{o.items.length>1?"s":""}{o.motivo&&<span style={{marginLeft:8,fontStyle:"italic"}}>Motivo: {o.motivo}</span>}</div>
                     </div>
                     <button onClick={()=>deleteOrder(o.id)} style={{...S.btn("danger"),padding:"4px 8px",fontSize:11}}>✕</button>
                   </div>
@@ -608,6 +623,20 @@ export default function Zonificacion() {
             <button style={S.btn("primary")} onClick={addDebt}>Agregar</button>
             <button style={S.btn()} onClick={()=>setShowDebt(false)}>Cancelar</button>
           </div>
+        </div>
+      </div></div>}
+
+      {motivoModal && <div style={S.modal}><div style={S.modalBox} onClick={e=>e.stopPropagation()}>
+        <h3 style={{margin:"0 0 12px",fontSize:18,color:motivoModal.action==="rechazado"?"#DC2626":"#D97706"}}>
+          {motivoModal.action==="rechazado"?"Rechazar pedido":"Devolver a zonificación"}
+        </h3>
+        <p style={{fontSize:13,color:"#6B7280",margin:"0 0 12px"}}>
+          {motivoModal.action==="rechazado"?"El pedido se elimina de la zonificación y queda registrado en el reporte diario.":"El pedido vuelve a la zonificación como pendiente y queda registrado en el reporte diario."}
+        </p>
+        <input style={S.input} placeholder="Motivo (ej: pedido viejo, estaba cerrado...)" value={motivoModal.motivo} onChange={e=>setMotivoModal(p=>({...p,motivo:e.target.value}))} autoFocus />
+        <div style={{display:"flex",gap:8,marginTop:12}}>
+          <button style={S.btn(motivoModal.action==="rechazado"?"danger":"warning")} onClick={confirmMotivo}>{motivoModal.action==="rechazado"?"Confirmar rechazo":"Confirmar devolución"}</button>
+          <button style={S.btn()} onClick={()=>setMotivoModal(null)}>Cancelar</button>
         </div>
       </div></div>}
     </div>
