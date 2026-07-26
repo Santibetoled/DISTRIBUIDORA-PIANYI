@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 
 /* ── ZONES ── */
 const ZONES = {
@@ -69,36 +69,57 @@ function mergeItems(existing, incoming) {
 
 /* ── PARSER ── */
 function parseWhatsApp(text) {
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  // Clean up WhatsApp formatting: remove invisible chars, normalize spaces
+  const raw = text.replace(/\r/g,"").replace(/\u00A0/g," ").replace(/\u200B/g,"");
+  const lines = raw.split("\n").map(l => l.trim()).filter(l => l.length > 0);
   const orders = [];
   let cur = null;
 
-  for (const line of lines) {
-    // Skip "pasó" lines
-    if (/^pas[oó]\s+/i.test(line)) continue;
+  function isItem(line) {
+    // Matches: "3 imperial Golden $1599" or "3 imperial Golden 1599" or "3 imperial Golden $1.599"
+    return /^\d+\s+.+\s+\$?\s*[\d.,]+\s*$/.test(line);
+  }
 
-    // Vendor line (standalone)
-    if (VENDEDORES.some(v => v.toLowerCase() === line.toLowerCase())) {
+  function isVendor(line) {
+    return VENDEDORES.some(v => v.toLowerCase() === line.toLowerCase());
+  }
+
+  function isSkip(line) {
+    return /^pas[oó]\s+/i.test(line) || /^pasó\s*/i.test(line);
+  }
+
+  function parseItem(line) {
+    const m = line.match(/^(\d+)\s+(.+?)\s+\$?\s*([\d.,]+)\s*$/);
+    if (!m) return null;
+    return {
+      id: uid(),
+      qty: parseInt(m[1]),
+      product: m[2].trim(),
+      price: parseFloat(m[3].replace(/\./g,"").replace(",",".")),
+      vendor: "",
+    };
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (isSkip(line)) continue;
+
+    if (isVendor(line)) {
       if (cur) cur.vendor = VENDEDORES.find(v => v.toLowerCase() === line.toLowerCase());
       continue;
     }
 
-    // Item line: starts with number, ends with price
-    const itemM = line.match(/^(\d+)\s+(.+?)\s+\$?\s*([\d.,]+)\s*$/);
-    if (itemM) {
-      if (cur) {
-        cur.items.push({
-          id: uid(),
-          qty: parseInt(itemM[1]),
-          product: itemM[2].trim(),
-          price: parseFloat(itemM[3].replace(/\./g,"").replace(",",".")),
-          vendor: cur.vendor || "",
-        });
+    if (isItem(line)) {
+      const item = parseItem(line);
+      if (item && cur) {
+        item.vendor = cur.vendor || "";
+        cur.items.push(item);
       }
       continue;
     }
 
-    // Otherwise it's an address/header line
+    // It's a header/address line — save previous order if it had items
     if (cur && cur.items.length > 0) orders.push(cur);
 
     let addr = line;
@@ -106,39 +127,40 @@ function parseWhatsApp(text) {
     let horario = "";
     let vendor = "";
 
-    // Extract horario
-    const hm = addr.match(/(\d{1,4})\s*a\s*(\d{1,4})/i);
+    // Extract horario (e.g. "0930 a 14", "9 a 14", "09:30 a 14:00")
+    const hm = addr.match(/(\d{2,4})\s*a\s*(\d{1,4})(?!\w)/i);
     if (hm) { horario = hm[0]; addr = addr.replace(hm[0],"").trim(); }
 
     // Extract localidad
     for (const [,bs] of Object.entries(ZONES)) {
       for (const b of bs) {
         const esc = b.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-        const re = new RegExp("\\b"+esc+"\\b","i");
+        const re = new RegExp(esc,"i");
         if (re.test(addr)) { localidad = b; addr = addr.replace(re,"").trim(); break; }
       }
       if (localidad) break;
     }
 
-    // Extract inline vendor
+    // Extract inline vendor from header
     for (const v of VENDEDORES) {
       const esc = v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-      const re = new RegExp("\\b"+esc+"\\b","i");
+      const re = new RegExp(esc,"i");
       if (re.test(addr)) { vendor = v; addr = addr.replace(re,"").trim(); }
     }
 
+    // Clean address
     addr = addr.replace(/[,\s]+$/,"").replace(/^\s*[,\s]+/,"").replace(/\s+/g," ").trim();
 
     cur = { id:uid(), address:addr||line, localidad, zone:findZone(localidad)||"SIN ZONA", horario, vendor, items:[], vehicleId:null, status:"pending" };
   }
   if (cur && cur.items.length > 0) orders.push(cur);
 
-  // Assign vendor to items
+  // Assign order-level vendor to items that don't have one
   for (const o of orders) {
     o.items = o.items.map(it => ({ ...it, vendor: it.vendor || o.vendor }));
   }
 
-  // Auto-merge within same paste (same address)
+  // Auto-merge within same paste (same normalized address)
   const merged = [];
   const map = new Map();
   for (const o of orders) {
@@ -148,6 +170,7 @@ function parseWhatsApp(text) {
       ex.items = mergeItems(ex.items, o.items);
       if (o.address.length > ex.address.length) ex.address = o.address;
       if (o.horario && !ex.horario) ex.horario = o.horario;
+      if (o.localidad && !ex.localidad) { ex.localidad = o.localidad; ex.zone = o.zone; }
     } else {
       const clone = { ...o, items: o.items.map(i=>({...i})) };
       map.set(key, clone);
@@ -167,7 +190,8 @@ const SAMPLE_DEBTS = [
 /* ── COMPONENT ── */
 export default function Zonificacion() {
   const [orders, setOrders] = useState([]);
-  const [debts, setDebts] = useState(SAMPLE_DEBTS);
+  const [debts, setDebts] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [activeTab, setActiveTab] = useState("zonificacion");
   const [expandedZones, setExpandedZones] = useState({});
@@ -176,9 +200,38 @@ export default function Zonificacion() {
   const [showPaste, setShowPaste] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
   const [showDebt, setShowDebt] = useState(false);
-  const [mergeInfo, setMergeInfo] = useState(null); // {conflicts, clean}
+  const [mergeInfo, setMergeInfo] = useState(null);
   const [newDebt, setNewDebt] = useState({client:"",address:"",localidad:"",amount:"",paid:""});
-  const [editingItem, setEditingItem] = useState(null); // {orderId, itemId, qty, price, product, vendor}
+  const [editingItem, setEditingItem] = useState(null);
+
+  // Load data on mount
+  useEffect(() => {
+    async function load() {
+      try {
+        const ordersRes = await window.storage.get("zonificacion:orders");
+        if (ordersRes) setOrders(JSON.parse(ordersRes.value));
+      } catch(e) { /* no saved orders yet */ }
+      try {
+        const debtsRes = await window.storage.get("zonificacion:debts");
+        if (debtsRes) setDebts(JSON.parse(debtsRes.value));
+        else setDebts(SAMPLE_DEBTS); // first time only
+      } catch(e) { setDebts(SAMPLE_DEBTS); }
+      setLoaded(true);
+    }
+    load();
+  }, []);
+
+  // Auto-save orders when they change
+  useEffect(() => {
+    if (!loaded) return;
+    try { window.storage.set("zonificacion:orders", JSON.stringify(orders)); } catch(e) {}
+  }, [orders, loaded]);
+
+  // Auto-save debts when they change
+  useEffect(() => {
+    if (!loaded) return;
+    try { window.storage.set("zonificacion:debts", JSON.stringify(debts)); } catch(e) {}
+  }, [debts, loaded]);
 
   /* ── Grouped data ── */
   const ordersByZone = useMemo(() => {
@@ -204,12 +257,17 @@ export default function Zonificacion() {
   }, [orders]);
 
   /* ── Handlers ── */
+  const [parseResult, setParseResult] = useState(null); // feedback message
+
   const handleParse = () => {
     if (!pasteText.trim()) return;
     const parsed = parseWhatsApp(pasteText);
-    if (parsed.length === 0) return;
+    if (parsed.length === 0) {
+      setParseResult("No se detectaron pedidos. Verificá el formato del texto.");
+      return;
+    }
 
-    // Check against existing orders
+    // Check against existing orders for merge
     const conflicts = [];
     const clean = [];
     for (const p of parsed) {
@@ -224,24 +282,27 @@ export default function Zonificacion() {
 
     if (conflicts.length > 0) {
       setMergeInfo({ conflicts, clean });
+      setParseResult(null);
     } else {
-      setOrders(prev => [...prev, ...parsed]);
+      setOrders(prev => [...prev, ...clean]);
+      setParseResult(clean.length + " pedido" + (clean.length>1?"s":"") + " cargado" + (clean.length>1?"s":"") + " (" + clean.reduce((s,o)=>s+o.items.length,0) + " artículos)");
       setPasteText("");
-      setShowPaste(false);
+      setTimeout(() => { setShowPaste(false); setParseResult(null); }, 1500);
     }
   };
 
   const handleConfirmMerge = () => {
     if (!mergeInfo) return;
+    const { conflicts, clean } = mergeInfo;
     setOrders(prev => {
-      let updated = [...prev];
-      for (const c of mergeInfo.conflicts) {
+      const updated = [...prev];
+      for (const c of conflicts) {
         const idx = updated.findIndex(o => o.id === c.existingId);
         if (idx >= 0) {
-          updated[idx] = { ...updated[idx], items: c.merged };
+          updated[idx] = { ...updated[idx], items: [...c.merged] };
         }
       }
-      return [...updated, ...mergeInfo.clean];
+      return [...updated, ...clean];
     });
     setMergeInfo(null);
     setPasteText("");
@@ -638,15 +699,28 @@ export default function Zonificacion() {
     );
   };
 
+  const handleReset = async () => {
+    if (!confirm("¿Borrar TODOS los pedidos y cobros pendientes? Esta acción no se puede deshacer.")) return;
+    setOrders([]);
+    setDebts([]);
+    try { await window.storage.delete("zonificacion:orders"); } catch(e) {}
+    try { await window.storage.delete("zonificacion:debts"); } catch(e) {}
+  };
+
   /* ── MAIN RENDER ── */
+  if (!loaded) return <div style={{...S.app,display:"flex",alignItems:"center",justifyContent:"center",height:"100vh"}}><span style={{fontSize:16,color:"#6B7280"}}>Cargando datos...</span></div>;
+
   return (
     <div style={S.app}>
       <div style={S.header}>
         <span style={S.logo}>PIANYI — Zonificación</span>
-        <div style={S.tabs}>
-          <button style={S.tab(activeTab==="zonificacion")} onClick={()=>setActiveTab("zonificacion")}>Zonificación</button>
-          <button style={S.tab(activeTab==="en_calle")} onClick={()=>setActiveTab("en_calle")}>Pedidos en calle</button>
-          <button style={S.tab(activeTab==="reporte")} onClick={()=>setActiveTab("reporte")}>Reporte diario</button>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={S.tabs}>
+            <button style={S.tab(activeTab==="zonificacion")} onClick={()=>setActiveTab("zonificacion")}>Zonificación</button>
+            <button style={S.tab(activeTab==="en_calle")} onClick={()=>setActiveTab("en_calle")}>Pedidos en calle</button>
+            <button style={S.tab(activeTab==="reporte")} onClick={()=>setActiveTab("reporte")}>Reporte diario</button>
+          </div>
+          <button onClick={handleReset} style={{...S.btn("danger"),padding:"6px 10px",fontSize:11}} title="Limpiar todos los datos">🗑</button>
         </div>
       </div>
 
@@ -661,9 +735,10 @@ export default function Zonificacion() {
             <h3 style={{margin:"0 0 12px",fontSize:18}}>Pegar pedidos de WhatsApp</h3>
             <p style={{fontSize:13,color:"#6B7280",margin:"0 0 12px"}}>Pegá los pedidos del grupo. El sistema detecta dirección, localidad, horario, vendedor y artículos. Si hay duplicados, te muestra la fusión antes de confirmar.</p>
             <textarea style={S.textarea} placeholder={"Ej:\n24/7 murguiondo 639 Liniers 0930 a 14\nPianyi 4\n3 imperial Golden $1599\n2 Heineken sin alcohol $1875"} value={pasteText} onChange={e=>setPasteText(e.target.value)} />
-            <div style={{display:"flex",gap:8,marginTop:12}}>
+            <div style={{display:"flex",gap:8,marginTop:12,alignItems:"center"}}>
               <button style={S.btn("primary")} onClick={handleParse}>Procesar</button>
-              <button style={S.btn()} onClick={()=>setShowPaste(false)}>Cancelar</button>
+              <button style={S.btn()} onClick={()=>{setShowPaste(false);setParseResult(null)}}>Cancelar</button>
+              {parseResult && <span style={{fontSize:13,color:parseResult.includes("No se")?"#DC2626":"#059669",fontWeight:600}}>{parseResult}</span>}
             </div>
           </div>
         </div>
