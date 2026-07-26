@@ -1,6 +1,5 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 
-/* ── ZONES ── */
 const ZONES = {
   "CABA CENTRO":["Almagro","Balvanera","Barracas","Barrio Norte","Boedo","Caballito","Congreso","Constitución","La Boca","Monserrat","Nueva Pompeya","Parque Chacabuco","Parque Patricios","Puerto Madero","Recoleta","Retiro","San Cristóbal","San Nicolás","San Telmo","Villa Crespo"],
   "CABA NORTE":["Agronomía","Belgrano","Chacarita","Coghlan","Colegiales","La Paternal","Monte Castro","Núñez","Palermo","Parque Chas","Saavedra","Villa del Parque","Villa Devoto","Villa Mitre","Villa Ortúzar","Villa Pueyrredón","Villa Santa Rita","Villa Urquiza"],
@@ -18,11 +17,7 @@ const ZONES = {
   "ZONA SUR 5":["Berisso","Brandsen","City Bell","Ensenada","Gonnet","La Plata","Lisandro Olmos","Melchor Romero","Ringuelet","Villa Elisa","Villa Elvira","Tolosa"],
 };
 const VENDEDORES = ["Alejandra","Benjamin","Santiago","Pianyi 1","Pianyi 2","Pianyi 3","Pianyi 4","Jeremias","Jose Costa","Mingo","Gerardo","Aly","Stella Fernandez","Ariel Tricariche"];
-const VENDOR_ALIASES = {
-  "jeremías":"Jeremias","jeremias":"Jeremias",
-  "gera":"Gerardo","gerar":"Gerardo","gerardo":"Gerardo",
-  "ali":"Aly","aly":"Aly",
-};
+const VENDOR_ALIASES = {"jeremías":"Jeremias","gera":"Gerardo","gerar":"Gerardo","ali":"Aly"};
 const VEHICLES = [
   {id:"t1",name:"Transit 1",color:"#3B82F6"},{id:"t2",name:"Transit 2",color:"#10B981"},
   {id:"t3",name:"Transit 3",color:"#F59E0B"},{id:"t4",name:"Transit 4",color:"#EF4444"},
@@ -30,170 +25,87 @@ const VEHICLES = [
   {id:"rbj",name:"Ranger Benji",color:"#14B8A6"},
 ];
 
-/* ── HELPERS ── */
 const uid = () => Math.random().toString(36).slice(2,10);
-const fmt = (n) => "$" + Number(n).toLocaleString("es-AR");
+const fmt = (n) => n ? ("$" + Number(n).toLocaleString("es-AR")) : "";
 
 function findZone(loc) {
   if (!loc) return null;
   const l = loc.trim().toLowerCase();
-  for (const [z,bs] of Object.entries(ZONES)) {
-    if (bs.some(b => b.toLowerCase() === l)) return z;
-  }
+  for (const [z,bs] of Object.entries(ZONES)) if (bs.some(b => b.toLowerCase() === l)) return z;
   return null;
 }
-
-// Extracts "street number" for comparison, case-insensitive
-function normalizeAddr(addr) {
-  const s = addr.toLowerCase().replace(/[,.\-\/]+/g," ").replace(/\s+/g," ").trim();
+function normalizeAddr(a) {
+  const s = a.toLowerCase().replace(/[,.\-\/]+/g," ").replace(/\s+/g," ").trim();
   const m = s.match(/([a-záéíóúüñ\s]+)\s+(\d{1,5})/);
   return m ? (m[1].trim()+" "+m[2]) : s;
 }
-
-// Case-insensitive product comparison
-function normProd(name) {
-  return name.trim().toLowerCase().replace(/\s+/g," ");
-}
-
-// Merge items: for same product keep highest qty, then highest price. Winner gets the vendor.
-function mergeItems(existing, incoming) {
-  const result = existing.map(it => ({...it}));
-  for (const inc of incoming) {
-    const idx = result.findIndex(r => normProd(r.product) === normProd(inc.product));
-    if (idx >= 0) {
-      const ex = result[idx];
-      if (inc.qty > ex.qty || (inc.qty === ex.qty && inc.price > ex.price)) {
-        result[idx] = { ...inc, id: ex.id };
-      }
-    } else {
-      result.push({ ...inc });
-    }
+function normProd(n) { return n.trim().toLowerCase().replace(/\s+/g," "); }
+function mergeItems(ex, inc) {
+  const r = ex.map(i=>({...i}));
+  for (const ni of inc) {
+    const idx = r.findIndex(x => normProd(x.product)===normProd(ni.product));
+    if (idx>=0) { const e=r[idx]; if (ni.qty>e.qty||(ni.qty===e.qty&&ni.price>e.price)) r[idx]={...ni,id:e.id}; }
+    else r.push({...ni});
   }
-  return result;
+  return r;
+}
+function resolveVendor(line) {
+  const low = line.toLowerCase().trim();
+  if (VENDOR_ALIASES[low]) return VENDOR_ALIASES[low];
+  const f = VENDEDORES.find(v => v.toLowerCase()===low);
+  return f || null;
+}
+function isVendorLine(line) {
+  const low = line.toLowerCase().trim();
+  return !!(VENDOR_ALIASES[low] || VENDEDORES.find(v => v.toLowerCase()===low));
 }
 
-/* ── PARSER ── */
 function parseWhatsApp(text) {
-  var raw = text.replace(/\r/g,"").replace(/\u00A0/g," ").replace(/\u200B/g,"");
-  var lines = raw.split("\n").map(function(l){return l.trim()}).filter(function(l){return l.length>0});
-  var orders = [];
-  var cur = null;
-
-  function isVendor(line) {
-    var low = line.toLowerCase();
-    if (VENDOR_ALIASES[low]) return true;
-    return VENDEDORES.some(function(v){return v.toLowerCase()===low});
-  }
-  function resolveVendor(line) {
-    var low = line.toLowerCase();
-    if (VENDOR_ALIASES[low]) return VENDOR_ALIASES[low];
-    var found = VENDEDORES.find(function(v){return v.toLowerCase()===low});
-    return found || line;
-  }
-  function isSkip(line) {
-    return /^pas[oó]\s+/i.test(line);
-  }
-  function hasStreetNumber(line) {
-    return /\d{3,5}/.test(line);
-  }
-  function isSingleName(line) {
-    return /^[a-záéíóúüñA-ZÁÉÍÓÚÜÑ\s]{2,30}$/.test(line) && !/\d/.test(line) && line.split(/\s+/).length<=3;
-  }
-  function startsWithQty(line) {
-    return /^\d+\s+[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/i.test(line);
-  }
+  const raw = text.replace(/\r/g,"").replace(/\u00A0/g," ").replace(/\u200B/g,"");
+  const lines = raw.split("\n").map(l=>l.trim()).filter(l=>l.length>0);
+  const orders = []; let cur = null;
+  const hasStreet = l => /\d{3,5}/.test(l);
+  const isSingleName = l => /^[a-záéíóúüñA-ZÁÉÍÓÚÜÑ\s]{2,30}$/.test(l) && !/\d/.test(l) && l.split(/\s+/).length<=3;
+  const startsQty = l => /^\d+\s+[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/i.test(l);
   function parseItem(line) {
-    var withPrice = line.match(/^(\d+)\s+(.+?)\s+\$?\s*([\d.,]+)\s*$/);
-    if (withPrice) {
-      return {id:uid(),qty:parseInt(withPrice[1]),product:withPrice[2].trim(),price:parseFloat(withPrice[3].replace(/\./g,"").replace(",","."))};
-    }
-    var noPrice = line.match(/^(\d+)\s+(.+)$/);
-    if (noPrice) {
-      return {id:uid(),qty:parseInt(noPrice[1]),product:noPrice[2].trim(),price:0};
-    }
+    const wp = line.match(/^(\d+)\s+(.+?)\s+\$?\s*([\d.,]+)\s*$/);
+    if (wp) return {id:uid(),qty:parseInt(wp[1]),product:wp[2].trim(),price:parseFloat(wp[3].replace(/\./g,"").replace(",","."))};
+    const np = line.match(/^(\d+)\s+(.+)$/);
+    if (np) return {id:uid(),qty:parseInt(np[1]),product:np[2].trim(),price:0};
     return null;
   }
-
-  for (var i=0;i<lines.length;i++) {
-    var line = lines[i];
-    if (isSkip(line)) continue;
-    // Known vendor from list or alias
-    if (isVendor(line)) {
-      if (cur) cur.vendor = resolveVendor(line);
-      continue;
-    }
-    // Single name that's NOT a vendor — store as contact note, not vendor
-    if (isSingleName(line) && cur && !hasStreetNumber(line)) {
-      cur.contactName = line;
-      continue;
-    }
-    if (startsWithQty(line) && cur) {
-      var item = parseItem(line);
-      if (item) { item.vendor = cur.vendor||""; cur.items.push(item); }
-      continue;
-    }
-    if (hasStreetNumber(line)) {
+  for (let i=0;i<lines.length;i++) {
+    const line = lines[i];
+    if (/^pas[oó]\s+/i.test(line)) continue;
+    if (isVendorLine(line)) { if (cur) cur.vendor=resolveVendor(line); continue; }
+    if (isSingleName(line) && cur && !hasStreet(line)) { cur.contactName=line; continue; }
+    if (startsQty(line) && cur) { const it=parseItem(line); if(it){it.vendor=cur.vendor||"";cur.items.push(it);} continue; }
+    if (hasStreet(line)) {
       if (cur && cur.items.length>0) orders.push(cur);
-      var addr = line;
-      var localidad = "";
-      var horario = "";
-      var vendor = "";
-      var hm = addr.match(/(\d{1,2}(?::?\d{2})?)\s*a\s*(\d{1,2}(?::?\d{2})?)\s*(?:hs)?/i);
-      if (hm) { horario=hm[0]; addr=addr.replace(hm[0],"").trim(); }
-      addr = addr.replace(/^\d{1,2}\/\d{1,2}\s*/,"").trim();
-      for (var zk in ZONES) {
-        var bs=ZONES[zk];
-        for (var bi=0;bi<bs.length;bi++) {
-          var b=bs[bi];
-          var esc=b.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-          var re=new RegExp(esc,"i");
-          if (re.test(addr)){localidad=b;addr=addr.replace(re,"").trim();break;}
-        }
-        if (localidad) break;
-      }
-      for (var vi=0;vi<VENDEDORES.length;vi++) {
-        var v=VENDEDORES[vi];
-        var vesc=v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-        var vre=new RegExp(vesc,"i");
-        if (vre.test(addr)){vendor=v;addr=addr.replace(vre,"").trim();}
-      }
+      let addr=line,localidad="",horario="",vendor="";
+      const hm=addr.match(/(\d{1,2}(?::?\d{2})?)\s*a\s*(\d{1,2}(?::?\d{2})?)\s*(?:hs)?/i);
+      if(hm){horario=hm[0];addr=addr.replace(hm[0],"").trim();}
+      addr=addr.replace(/^\d{1,2}\/\d{1,2}\s*/,"").trim();
+      for(const[,bs]of Object.entries(ZONES)){for(const b of bs){const re=new RegExp(b.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");if(re.test(addr)){localidad=b;addr=addr.replace(re,"").trim();break;}}if(localidad)break;}
+      for(const v of VENDEDORES){const re=new RegExp(v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");if(re.test(addr)){vendor=v;addr=addr.replace(re,"").trim();}}
+      if(!vendor){const al=Object.keys(VENDOR_ALIASES);for(const a of al){const re=new RegExp("\\b"+a+"\\b","i");if(re.test(addr)){vendor=VENDOR_ALIASES[a];addr=addr.replace(re,"").trim();}}}
       addr=addr.replace(/[,\s]+$/,"").replace(/^\s*[,\s]+/,"").replace(/\s+/g," ").trim();
-      cur={id:uid(),address:addr||line,localidad:localidad,zone:findZone(localidad)||"SIN ZONA",horario:horario,vendor:vendor,items:[],vehicleId:null,status:"pending",contactName:""};
+      cur={id:uid(),address:addr||line,localidad,zone:findZone(localidad)||"SIN ZONA",horario,vendor,items:[],vehicleId:null,status:"pending",contactName:""};
     }
   }
-  if (cur && cur.items.length>0) orders.push(cur);
-  for (var oi=0;oi<orders.length;oi++) {
-    var o=orders[oi];
-    o.items=o.items.map(function(it){return Object.assign({},it,{vendor:it.vendor||o.vendor})});
-  }
-  var merged=[];
-  var map=new Map();
-  for (var mi=0;mi<orders.length;mi++) {
-    var mo=orders[mi];
-    var key=normalizeAddr(mo.address);
-    if (map.has(key)) {
-      var ex=map.get(key);
-      ex.items=mergeItems(ex.items,mo.items);
-      if (mo.address.length>ex.address.length) ex.address=mo.address;
-      if (mo.horario&&!ex.horario) ex.horario=mo.horario;
-      if (mo.localidad&&!ex.localidad){ex.localidad=mo.localidad;ex.zone=mo.zone;}
-    } else {
-      var clone=Object.assign({},mo,{items:mo.items.map(function(ii){return Object.assign({},ii)})});
-      map.set(key,clone);
-      merged.push(clone);
-    }
-  }
+  if(cur&&cur.items.length>0)orders.push(cur);
+  for(const o of orders)o.items=o.items.map(it=>({...it,vendor:it.vendor||o.vendor}));
+  const merged=[],map=new Map();
+  for(const o of orders){const k=normalizeAddr(o.address);if(map.has(k)){const e=map.get(k);e.items=mergeItems(e.items,o.items);if(o.address.length>e.address.length)e.address=o.address;if(o.horario&&!e.horario)e.horario=o.horario;if(o.localidad&&!e.localidad){e.localidad=o.localidad;e.zone=o.zone;}}else{map.set(k,{...o,items:o.items.map(i=>({...i}))});merged.push(map.get(k));}}
   return merged;
 }
 
-/* ── SAMPLE DEBTS ── */
 const SAMPLE_DEBTS = [
   {id:"d1",client:"La Esquina de Juan",address:"Av. Corrientes 4521",localidad:"Almagro",zone:"CABA CENTRO",amount:45000,paid:15000},
   {id:"d2",client:"Kiosco Marta",address:"Cabildo 1230",localidad:"Belgrano",zone:"CABA NORTE",amount:22000,paid:0},
   {id:"d3",client:"Almacén Don Pedro",address:"Rivadavia 8800",localidad:"Liniers",zone:"CABA OESTE",amount:18500,paid:5000},
 ];
 
-/* ── COMPONENT ── */
 export default function Zonificacion() {
   const [orders, setOrders] = useState([]);
   const [debts, setDebts] = useState([]);
@@ -209,293 +121,232 @@ export default function Zonificacion() {
   const [mergeInfo, setMergeInfo] = useState(null);
   const [newDebt, setNewDebt] = useState({client:"",address:"",localidad:"",amount:"",paid:""});
   const [editingItem, setEditingItem] = useState(null);
+  const [depuratingOrder, setDepuratingOrder] = useState(null);
+  const [parseResult, setParseResult] = useState(null);
 
-  // Load data on mount
   useEffect(() => {
-    try {
-      const savedOrders = localStorage.getItem("pianyi_zon_orders");
-      if (savedOrders) setOrders(JSON.parse(savedOrders));
-    } catch(e) {}
-    try {
-      const savedDebts = localStorage.getItem("pianyi_zon_debts");
-      if (savedDebts) setDebts(JSON.parse(savedDebts));
-      else setDebts(SAMPLE_DEBTS);
-    } catch(e) { setDebts(SAMPLE_DEBTS); }
+    try { const s=localStorage.getItem("pianyi_zon_orders"); if(s) setOrders(JSON.parse(s)); } catch(e){}
+    try { const s=localStorage.getItem("pianyi_zon_debts"); if(s) setDebts(JSON.parse(s)); else setDebts(SAMPLE_DEBTS); } catch(e){ setDebts(SAMPLE_DEBTS); }
     setLoaded(true);
   }, []);
+  useEffect(() => { if(loaded) try{localStorage.setItem("pianyi_zon_orders",JSON.stringify(orders))}catch(e){} }, [orders,loaded]);
+  useEffect(() => { if(loaded) try{localStorage.setItem("pianyi_zon_debts",JSON.stringify(debts))}catch(e){} }, [debts,loaded]);
 
-  // Auto-save orders when they change
-  useEffect(() => {
-    if (!loaded) return;
-    try { localStorage.setItem("pianyi_zon_orders", JSON.stringify(orders)); } catch(e) {}
-  }, [orders, loaded]);
-
-  // Auto-save debts when they change
-  useEffect(() => {
-    if (!loaded) return;
-    try { localStorage.setItem("pianyi_zon_debts", JSON.stringify(debts)); } catch(e) {}
-  }, [debts, loaded]);
-
-  /* ── Grouped data ── */
   const ordersByZone = useMemo(() => {
-    const g = {}; for (const z of Object.keys(ZONES)) g[z] = []; g["SIN ZONA"] = [];
-    for (const o of orders) if (o.status==="pending"||o.status==="depurado") { (g[o.zone]||(g[o.zone]=[])).push(o); }
+    const g={}; for(const z of Object.keys(ZONES))g[z]=[]; g["SIN ZONA"]=[];
+    for(const o of orders){ const z=o.zone||"SIN ZONA"; if(!g[z])g[z]=[]; g[z].push(o); }
     return g;
   }, [orders]);
-
-  const debtsByZone = useMemo(() => {
-    const g = {};
-    for (const d of debts) { (g[d.zone]||(g[d.zone]=[])).push(d); }
-    return g;
-  }, [debts]);
-
+  const debtsByZone = useMemo(() => { const g={}; for(const d of debts)(g[d.zone]||(g[d.zone]=[])).push(d); return g; }, [debts]);
   const streetByVehicle = useMemo(() => {
-    const g = {};
-    for (const o of orders) {
-      if (o.status==="preparando"||o.status==="en_calle") {
-        (g[o.vehicleId||"sin"]||(g[o.vehicleId||"sin"]=[])).push(o);
-      }
-    }
+    const g={};
+    for(const o of orders) if(o.vehicleId&&(o.status==="preparando"||o.status==="en_calle")) (g[o.vehicleId]||(g[o.vehicleId]=[])).push(o);
     return g;
   }, [orders]);
-
-  /* ── Handlers ── */
-  const [parseResult, setParseResult] = useState(null); // feedback message
 
   const handleParse = () => {
-    if (!pasteText.trim()) return;
-    const parsed = parseWhatsApp(pasteText);
-    if (parsed.length === 0) {
-      setParseResult("No se detectaron pedidos. Verificá el formato del texto.");
-      return;
-    }
-
-    // Check against existing orders for merge
-    const conflicts = [];
-    const clean = [];
-    for (const p of parsed) {
-      const key = normalizeAddr(p.address);
-      const ex = orders.find(o => normalizeAddr(o.address)===key && o.status==="pending");
-      if (ex) {
-        conflicts.push({ existingId:ex.id, existing:ex, incoming:p, merged:mergeItems(ex.items, p.items) });
-      } else {
-        clean.push(p);
-      }
-    }
-
-    if (conflicts.length > 0) {
-      setMergeInfo({ conflicts, clean });
-      setParseResult(null);
-    } else {
-      setOrders(prev => [...prev, ...clean]);
-      setParseResult(clean.length + " pedido" + (clean.length>1?"s":"") + " cargado" + (clean.length>1?"s":"") + " (" + clean.reduce((s,o)=>s+o.items.length,0) + " artículos)");
-      setPasteText("");
-      setTimeout(() => { setShowPaste(false); setParseResult(null); }, 1500);
-    }
+    if(!pasteText.trim()) return;
+    const parsed=parseWhatsApp(pasteText);
+    if(!parsed.length){setParseResult("No se detectaron pedidos.");return;}
+    const conflicts=[],clean=[];
+    for(const p of parsed){const k=normalizeAddr(p.address);const ex=orders.find(o=>normalizeAddr(o.address)===k&&o.status==="pending");if(ex)conflicts.push({existingId:ex.id,merged:mergeItems(ex.items,p.items)});else clean.push(p);}
+    if(conflicts.length>0){setMergeInfo({conflicts,clean});}
+    else{setOrders(prev=>[...prev,...clean]);setParseResult(clean.length+" pedido"+(clean.length>1?"s":"")+" cargado"+(clean.length>1?"s":""));setPasteText("");setTimeout(()=>{setShowPaste(false);setParseResult(null);},1200);}
   };
-
   const handleConfirmMerge = () => {
-    if (!mergeInfo) return;
-    const { conflicts, clean } = mergeInfo;
-    setOrders(prev => {
-      const updated = [...prev];
-      for (const c of conflicts) {
-        const idx = updated.findIndex(o => o.id === c.existingId);
-        if (idx >= 0) {
-          updated[idx] = { ...updated[idx], items: [...c.merged] };
-        }
-      }
-      return [...updated, ...clean];
-    });
-    setMergeInfo(null);
-    setPasteText("");
-    setShowPaste(false);
+    if(!mergeInfo)return;
+    setOrders(prev=>{const u=[...prev];for(const c of mergeInfo.conflicts){const i=u.findIndex(o=>o.id===c.existingId);if(i>=0)u[i]={...u[i],items:[...c.merged]};}return[...u,...mergeInfo.clean];});
+    setMergeInfo(null);setPasteText("");setShowPaste(false);
   };
-
-  const handleAssign = (vehicleId) => {
-    setOrders(prev => prev.map(o => selectedOrders.has(o.id) ? {...o, vehicleId, status:"preparando"} : o));
-    setSelectedOrders(new Set());
-    setShowAssign(false);
+  const handleAssign = (vid) => {
+    setOrders(prev=>prev.map(o=>selectedOrders.has(o.id)?{...o,vehicleId:vid,status:"preparando"}:o));
+    setSelectedOrders(new Set());setShowAssign(false);
   };
-
-  const toggleSelect = (id) => {
-    setSelectedOrders(prev => { const n = new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
-  };
-
-  const deleteOrder = (id) => setOrders(prev => prev.filter(o => o.id !== id));
-  const deleteVehicle = (vid) => setOrders(prev => prev.filter(o => o.vehicleId !== vid));
-  const returnToZone = (id) => setOrders(prev => prev.map(o => o.id===id ? {...o, status:"pending", vehicleId:null} : o));
-
-  const startEdit = (orderId, item) => setEditingItem({orderId, itemId:item.id, qty:item.qty, price:item.price, product:item.product, vendor:item.vendor||""});
+  const toggleSelect = (id) => setSelectedOrders(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
+  const deleteOrder = (id) => setOrders(prev=>prev.filter(o=>o.id!==id));
+  const deleteVehicle = (vid) => setOrders(prev=>prev.filter(o=>o.vehicleId!==vid));
+  const returnToZone = (id) => setOrders(prev=>prev.map(o=>o.id===id?{...o,status:"pending",vehicleId:null}:o));
+  const startEdit = (oid,item) => setEditingItem({orderId:oid,itemId:item.id,qty:item.qty,price:item.price,product:item.product,vendor:item.vendor||""});
   const cancelEdit = () => setEditingItem(null);
   const saveEdit = () => {
-    if (!editingItem) return;
-    setOrders(prev => prev.map(o => {
-      if (o.id !== editingItem.orderId) return o;
-      return {...o, items: o.items.map(it => it.id !== editingItem.itemId ? it : {...it, qty:parseInt(editingItem.qty)||1, price:parseFloat(editingItem.price)||0, product:editingItem.product, vendor:editingItem.vendor})};
-    }));
+    if(!editingItem)return;
+    setOrders(prev=>prev.map(o=>{if(o.id!==editingItem.orderId)return o;return{...o,items:o.items.map(it=>it.id!==editingItem.itemId?it:{...it,qty:parseInt(editingItem.qty)||1,price:parseFloat(editingItem.price)||0,product:editingItem.product,vendor:editingItem.vendor})};}));
     setEditingItem(null);
   };
-  const deleteItem = (orderId, itemId) => {
-    setOrders(prev => prev.map(o => {
-      if (o.id !== orderId) return o;
-      const newItems = o.items.filter(it => it.id !== itemId);
-      return newItems.length > 0 ? {...o, items:newItems} : null;
-    }).filter(Boolean));
-  };
-
-  const moveOrder = (vid, oid, dir) => {
-    setOrders(prev => {
-      const all = [...prev];
-      const vIds = all.reduce((acc,o,i) => {
-        if (o.vehicleId===vid && (o.status==="preparando"||o.status==="en_calle")) acc.push(i);
-        return acc;
-      }, []);
-      const pos = vIds.findIndex(i => all[i].id === oid);
-      if (pos < 0) return prev;
-      const swapPos = dir==="up" ? pos-1 : pos+1;
-      if (swapPos < 0 || swapPos >= vIds.length) return prev;
-      const a = vIds[pos], b = vIds[swapPos];
-      [all[a], all[b]] = [all[b], all[a]];
-      return all;
-    });
-  };
-
-  const setOrderPos = (vid, oid, newPos) => {
-    setOrders(prev => {
-      const all = [...prev];
-      const vIndices = all.reduce((acc,o,i) => {
-        if (o.vehicleId===vid && (o.status==="preparando"||o.status==="en_calle")) acc.push(i);
-        return acc;
-      }, []);
-      const curPos = vIndices.findIndex(i => all[i].id === oid);
-      if (curPos < 0) return prev;
-      const target = Math.max(0, Math.min(newPos-1, vIndices.length-1));
-      if (target === curPos) return prev;
-      const vOrders = vIndices.map(i => all[i]);
-      const [moved] = vOrders.splice(curPos, 1);
-      vOrders.splice(target, 0, moved);
-      for (let j=0; j<vIndices.length; j++) all[vIndices[j]] = vOrders[j];
-      return all;
-    });
-  };
-
-  const toggleZone = (z) => setExpandedZones(p => ({...p, [z]: !p[z]}));
-
+  const deleteItem = (oid,iid) => setOrders(prev=>prev.map(o=>{if(o.id!==oid)return o;const ni=o.items.filter(it=>it.id!==iid);return ni.length>0?{...o,items:ni}:null;}).filter(Boolean));
+  const toggleZone = (z) => setExpandedZones(p=>({...p,[z]:!p[z]}));
   const addDebt = () => {
-    const zone = findZone(newDebt.localidad) || "SIN ZONA";
-    setDebts(prev => [...prev, {id:uid(),client:newDebt.client,address:newDebt.address,localidad:newDebt.localidad,zone,amount:parseFloat(newDebt.amount)||0,paid:parseFloat(newDebt.paid)||0}]);
-    setNewDebt({client:"",address:"",localidad:"",amount:"",paid:""});
-    setShowDebt(false);
+    const zone=findZone(newDebt.localidad)||"SIN ZONA";
+    setDebts(prev=>[...prev,{id:uid(),client:newDebt.client,address:newDebt.address,localidad:newDebt.localidad,zone,amount:parseFloat(newDebt.amount)||0,paid:parseFloat(newDebt.paid)||0}]);
+    setNewDebt({client:"",address:"",localidad:"",amount:"",paid:""});setShowDebt(false);
+  };
+  const deleteDebt = (id) => setDebts(prev=>prev.filter(d=>d.id!==id));
+
+  // Depuration handlers
+  const depurateTotal = (id) => setOrders(prev=>prev.map(o=>o.id===id?{...o,status:"entregado"}:o));
+  const depurateReject = (id) => setOrders(prev=>prev.map(o=>o.id===id?{...o,status:"pending",vehicleId:null}:o));
+  const depuratePartialConfirm = (oid, deliveredMap) => {
+    setOrders(prev => {
+      const updated = [...prev];
+      const idx = updated.findIndex(o=>o.id===oid);
+      if(idx<0) return prev;
+      const order = updated[idx];
+      const returnItems = [];
+      const deliveredItems = [];
+      for(const item of order.items) {
+        const dQty = deliveredMap[item.id] ?? item.qty;
+        if(dQty >= item.qty) { deliveredItems.push({...item}); }
+        else if(dQty > 0) {
+          deliveredItems.push({...item, qty: dQty});
+          returnItems.push({...item, id: uid(), qty: item.qty - dQty});
+        } else { returnItems.push({...item, id: uid()}); }
+      }
+      updated[idx] = {...order, items: deliveredItems, status: "entregado"};
+      if(returnItems.length > 0) {
+        updated.push({...order, id: uid(), items: returnItems, vehicleId: null, status: "depurado"});
+      }
+      return updated;
+    });
+    setDepuratingOrder(null);
   };
 
-  const deleteDebt = (id) => setDebts(prev => prev.filter(d => d.id !== id));
+  const moveOrder = (vid,oid,dir) => {
+    setOrders(prev=>{const a=[...prev];const vi=a.reduce((ac,o,i)=>{if(o.vehicleId===vid&&(o.status==="preparando"||o.status==="en_calle"))ac.push(i);return ac;},[]);const p=vi.findIndex(i=>a[i].id===oid);if(p<0)return prev;const sp=dir==="up"?p-1:p+1;if(sp<0||sp>=vi.length)return prev;[a[vi[p]],a[vi[sp]]]=[a[vi[sp]],a[vi[p]]];return a;});
+  };
+  const setOrderPos = (vid,oid,np) => {
+    setOrders(prev=>{const a=[...prev];const vi=a.reduce((ac,o,i)=>{if(o.vehicleId===vid&&(o.status==="preparando"||o.status==="en_calle"))ac.push(i);return ac;},[]);const cp=vi.findIndex(i=>a[i].id===oid);if(cp<0)return prev;const t=Math.max(0,Math.min(np-1,vi.length-1));if(t===cp)return prev;const vo=vi.map(i=>a[i]);const[m]=vo.splice(cp,1);vo.splice(t,0,m);for(let j=0;j<vi.length;j++)a[vi[j]]=vo[j];return a;});
+  };
 
-  /* ── Print HDR ── */
+  // Print HDR - real format
   const printHDR = (vehicleId) => {
-    const vehicle = VEHICLES.find(v => v.id === vehicleId);
-    const vOrders = orders.filter(o => o.vehicleId===vehicleId && (o.status==="preparando"||o.status==="en_calle"));
-    const vDebts = debts.filter(d => vOrders.some(o => normalizeAddr(o.address)===normalizeAddr(d.address)));
-    const today = new Date().toLocaleDateString("es-AR");
+    const veh = VEHICLES.find(v=>v.id===vehicleId);
+    const vOrds = orders.filter(o=>o.vehicleId===vehicleId&&(o.status==="preparando"||o.status==="en_calle"));
+    const vDebts = debts.filter(d=>vOrds.some(o=>normalizeAddr(o.address)===normalizeAddr(d.address)));
+    const today = new Date();
+    const dd = today.getDate();
+    const mm = today.getMonth()+1;
+    const yy = today.getFullYear();
+    const dateStr = dd+"/"+mm+"/"+yy;
 
-    let tableRows = "";
-    vOrders.forEach((o, i) => {
-      const debt = vDebts.find(d => normalizeAddr(d.address)===normalizeAddr(o.address));
-      tableRows += '<tr style="background:#f3f4f6;font-weight:700"><td colspan="8">Parada '+(i+1)+': '+o.address+', '+o.localidad+'</td></tr>';
-      o.items.forEach((item, j) => {
-        tableRows += '<tr>';
-        tableRows += '<td>'+(j===0?(i+1):'')+'</td>';
-        tableRows += '<td>'+(j===0?o.address:'')+'</td>';
-        tableRows += '<td>'+(j===0?o.localidad:'')+'</td>';
-        tableRows += '<td>'+(j===0?(o.horario||'-'):'')+'</td>';
-        tableRows += '<td>'+item.product+'</td>';
-        tableRows += '<td>'+item.qty+'</td>';
-        tableRows += '<td>$'+Number(item.price).toLocaleString("es-AR")+'</td>';
-        tableRows += '<td>'+(item.vendor||'-')+'</td>';
-        tableRows += '</tr>';
+    let ordersHtml = "";
+    vOrds.forEach((o,i) => {
+      const debt = vDebts.find(d=>normalizeAddr(d.address)===normalizeAddr(o.address));
+      const itemLines = [];
+      let lineItems = [];
+      o.items.forEach((item,j) => {
+        const pStr = item.price ? " $"+Number(item.price).toLocaleString("es-AR") : "";
+        const vStr = item.vendor ? " "+item.vendor : "";
+        lineItems.push(item.qty+" "+item.product+pStr+vStr);
+        if(lineItems.length===2 || j===o.items.length-1) {
+          itemLines.push(lineItems.join(" | "));
+          lineItems = [];
+        }
       });
-      if (debt) {
-        tableRows += '<tr style="background:#fef2f2"><td></td><td colspan="4"><strong style="color:#dc2626">⚠ DEUDA PENDIENTE DE PAGO</strong></td><td colspan="3"><strong>$'+(debt.amount-debt.paid).toLocaleString("es-AR")+'</strong></td></tr>';
-      }
+      const addrLine = (o.horario ? o.horario+" " : "") + o.address.toUpperCase() + " " + (o.localidad||"").toUpperCase();
+      const debtLine = debt ? '<div style="color:#dc2626;font-weight:700;font-size:9px;">⚠ COBRO PENDIENTE $'+(debt.amount-debt.paid).toLocaleString("es-AR")+'</div>' : "";
+      ordersHtml += '<div style="margin-bottom:6px;"><div style="font-weight:700;font-size:10px;">'+addrLine+'</div>'+debtLine;
+      itemLines.forEach(l => { ordersHtml += '<div style="font-size:9px;padding-left:6px;">'+l+'</div>'; });
+      ordersHtml += '</div>';
     });
 
-    const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>HDR '+vehicle.name+'</title>'
-      +'<style>'
-      +'*{margin:0;padding:0;box-sizing:border-box}'
-      +'body{font-family:Arial,sans-serif;padding:20px;font-size:12px;color:#111}'
-      +'h1{font-size:18px;margin-bottom:2px}'
-      +'.sub{color:#555;margin-bottom:12px;font-size:11px}'
-      +'table{width:100%;border-collapse:collapse;margin-bottom:16px}'
-      +'th,td{border:1px solid #333;padding:5px 8px;text-align:left;font-size:11px}'
-      +'th{background:#e5e7eb;font-weight:700}'
-      +'.notes-section{margin-top:20px;border:1px solid #333;padding:12px}'
-      +'.notes-section h3{font-size:13px;margin-bottom:8px}'
-      +'.notes-box{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:8px}'
-      +'.note-field{border:1px solid #999;min-height:90px;padding:6px;font-size:10px}'
-      +'.note-field .label{font-weight:700;margin-bottom:4px;font-size:10px}'
-      +'.firma-section{margin-top:24px;display:flex;justify-content:space-between;gap:20px}'
-      +'.firma-box{flex:1;border:1px solid #999;min-height:110px;padding:8px}'
-      +'.firma-box .label{font-weight:700;font-size:10px;margin-bottom:4px}'
-      +'@media print{body{padding:10px}button{display:none!important}}'
-      +'</style></head><body>'
-      +'<h1>HOJA DE RUTA &mdash; '+vehicle.name+'</h1>'
-      +'<div class="sub">Fecha: '+today+' &bull; Pedidos: '+vOrders.length+'</div>'
-      +'<table><thead><tr><th style="width:30px">#</th><th>Dirección</th><th>Localidad</th><th>Horario</th><th>Producto</th><th>Cant.</th><th>Precio</th><th>Vendedor</th></tr></thead>'
-      +'<tbody>'+tableRows+'</tbody></table>'
-      +'<div class="notes-section"><h3>Observaciones del reparto</h3>'
-      +'<div class="notes-box">'
-      +'<div class="note-field"><div class="label">SOBRANTES</div></div>'
-      +'<div class="note-field"><div class="label">DEVOLUCIONES</div></div>'
-      +'<div class="note-field"><div class="label">ROTURAS</div></div>'
-      +'</div></div>'
-      +'<div class="firma-section">'
-      +'<div class="firma-box"><div class="label">OBSERVACIONES GENERALES</div></div>'
-      +'<div class="firma-box"><div class="label">FIRMA CHOFER</div></div>'
-      +'<div class="firma-box"><div class="label">FIRMA RESPONSABLE</div></div>'
-      +'</div></body></html>';
+    const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>HDR '+(veh?veh.name:"")+'</title>'
+    +'<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:10px;color:#111;padding:12px}'
+    +'table{width:100%;border-collapse:collapse}td,th{border:1px solid #333;padding:3px 6px;font-size:9px;vertical-align:top}'
+    +'.hdr-header td{font-weight:700;font-size:9px;height:22px}'
+    +'@media print{body{padding:6px}}</style></head><body>'
+    +'<table><tr class="hdr-header"><td>FECHA<br><span style="font-weight:400">'+dateStr+'</span></td>'
+    +'<td>VEHICULO<br><span style="font-weight:400">'+(veh?veh.name.toUpperCase():"")+'</span></td>'
+    +'<td>NV DIA<br><span style="font-weight:400">'+vOrds.length+'</span></td>'
+    +'<td>FALTANTES</td><td>FIRMA ADM</td></tr>'
+    +'<tr class="hdr-header"><td>CARGA</td><td>CHOFER</td><td>NV PEND</td><td colspan="2">FIRMA REPARTO</td></tr>'
+    +'<tr class="hdr-header"><td>CONTROL</td><td>ACOMP.</td><td colspan="3">TOTAL NV</td></tr></table>'
+
+    +'<table style="margin-top:4px"><tr class="hdr-header">'
+    +'<td>TOTAL NV DIARIAS</td><td>CASH</td><td>TRANSFERENCIAS</td>'
+    +'<td>CANT FIRMAS</td><td>CANT DESCUENTOS</td><td>SOBRANTES</td><td>PEND.CASH</td><td>PEND.TRANSF</td></tr>'
+    +'<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></table>'
+
+    +'<table style="margin-top:4px"><tr class="hdr-header"><td colspan="2">FACTURACION</td><td colspan="2">CAJA CASH</td></tr>'
+    +'<tr><td colspan="2">&nbsp;</td><td colspan="2">&nbsp;</td></tr></table>'
+
+    +'<table style="margin-top:4px"><tr class="hdr-header"><td>ROTURAS</td><td>SOBRANTES</td><td>FIRMA ADM</td><td>FIRMA REPARTO</td></tr>'
+    +'<tr><td style="height:50px">&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></table>'
+
+    +'<div style="margin-top:8px;border:1px solid #333;padding:6px;">'+ordersHtml+'</div>'
+    +'</body></html>';
 
     const w = window.open("","_blank","width=900,height=700");
-    if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 500); }
+    if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
   };
 
-  /* ── Search filter ── */
   const filteredZones = useMemo(() => {
-    if (!searchTerm) return Object.keys(ZONES);
-    const t = searchTerm.toLowerCase();
-    return Object.keys(ZONES).filter(z => {
-      if (z.toLowerCase().includes(t)) return true;
-      return (ordersByZone[z]||[]).some(o => o.address.toLowerCase().includes(t) || o.localidad.toLowerCase().includes(t) || o.items.some(it => it.product.toLowerCase().includes(t)));
+    if(!searchTerm) return Object.keys(ZONES);
+    const t=searchTerm.toLowerCase();
+    return Object.keys(ZONES).filter(z=>{
+      if(z.toLowerCase().includes(t))return true;
+      return(ordersByZone[z]||[]).some(o=>o.address.toLowerCase().includes(t)||o.localidad.toLowerCase().includes(t)||o.items.some(it=>it.product.toLowerCase().includes(t)));
     });
-  }, [searchTerm, ordersByZone]);
+  },[searchTerm,ordersByZone]);
 
-  /* ── STYLES ── */
+  const handleReset = () => {
+    if(!confirm("¿Borrar TODOS los pedidos y cobros pendientes? Esta acción no se puede deshacer."))return;
+    setOrders([]);setDebts([]);
+    try{localStorage.removeItem("pianyi_zon_orders")}catch(e){}
+    try{localStorage.removeItem("pianyi_zon_debts")}catch(e){}
+  };
+
   const S = {
     app:{fontFamily:"'Inter',-apple-system,sans-serif",background:"#fff",color:"#1A1A2E",minHeight:"100vh"},
     header:{padding:"16px 20px",borderBottom:"1px solid #E5E7EB",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8},
-    logo:{fontSize:20,fontWeight:700,color:"#1A1A2E",letterSpacing:"-0.5px"},
+    logo:{fontSize:20,fontWeight:700,color:"#1A1A2E"},
     tabs:{display:"flex",gap:4,background:"#F3F4F6",borderRadius:8,padding:3},
-    tab:(a)=>({padding:"8px 16px",borderRadius:6,border:"none",cursor:"pointer",fontSize:13,fontWeight:500,background:a?"#fff":"transparent",color:a?"#1A1A2E":"#6B7280",boxShadow:a?"0 1px 3px rgba(0,0,0,0.1)":"none"}),
+    tab:a=>({padding:"8px 16px",borderRadius:6,border:"none",cursor:"pointer",fontSize:13,fontWeight:500,background:a?"#fff":"transparent",color:a?"#1A1A2E":"#6B7280",boxShadow:a?"0 1px 3px rgba(0,0,0,0.1)":"none"}),
     toolbar:{padding:"12px 20px",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",borderBottom:"1px solid #E5E7EB"},
-    btn:(v)=>({padding:"8px 14px",borderRadius:6,border:v?"none":"1px solid #D1D5DB",cursor:"pointer",fontSize:13,fontWeight:600,
-      ...(v==="primary"?{background:"#3B82F6",color:"#fff"}:v==="danger"?{background:"#DC2626",color:"#fff"}:v==="success"?{background:"#059669",color:"#fff"}:v==="warning"?{background:"#D97706",color:"#fff"}:{background:"#F3F4F6",color:"#374151"})}),
+    btn:v=>({padding:"8px 14px",borderRadius:6,border:v?"none":"1px solid #D1D5DB",cursor:"pointer",fontSize:13,fontWeight:600,...(v==="primary"?{background:"#3B82F6",color:"#fff"}:v==="danger"?{background:"#DC2626",color:"#fff"}:v==="success"?{background:"#059669",color:"#fff"}:v==="warning"?{background:"#D97706",color:"#fff"}:{background:"#F3F4F6",color:"#374151"})}),
     search:{padding:"8px 12px",borderRadius:6,border:"1px solid #D1D5DB",background:"#fff",color:"#1A1A2E",fontSize:13,flex:1,minWidth:200,outline:"none"},
     zone:{margin:"0 12px 8px",borderRadius:8,overflow:"hidden",border:"1px solid #E5E7EB"},
-    zoneHead:(has)=>({padding:"10px 16px",background:has?"#F9FAFB":"#FAFAFA",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",userSelect:"none"}),
-    badge:(c)=>({background:c||"#3B82F6",color:"#fff",padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}),
-    orderCard:(vc)=>({padding:"10px 16px",borderBottom:"1px solid #E5E7EB",background:vc?vc+"08":"#fff",borderLeft:vc?"3px solid "+vc:"3px solid transparent"}),
+    zoneHead:has=>({padding:"10px 16px",background:has?"#F9FAFB":"#FAFAFA",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",userSelect:"none"}),
+    badge:c=>({background:c||"#3B82F6",color:"#fff",padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}),
+    orderCard:vc=>({padding:"10px 16px",borderBottom:"1px solid #E5E7EB",background:vc?vc+"10":"#fff",borderLeft:vc?"3px solid "+vc:"3px solid transparent"}),
     itemRow:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",fontSize:13},
     debtRow:{background:"#FEF2F2",borderLeft:"3px solid #DC2626",padding:"10px 16px",borderBottom:"1px solid #E5E7EB"},
-    debtBadge:{background:"#DC2626",color:"#fff",padding:"3px 10px",borderRadius:4,fontSize:11,fontWeight:700,letterSpacing:"0.5px"},
+    debtBadge:{background:"#DC2626",color:"#fff",padding:"3px 10px",borderRadius:4,fontSize:11,fontWeight:700},
     debtGroupHead:{padding:"6px 16px",background:"#FEF2F2",borderBottom:"1px solid #E5E7EB",fontSize:12,fontWeight:600,color:"#DC2626"},
     modal:{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:16},
     modalBox:{background:"#fff",borderRadius:12,padding:24,maxWidth:600,width:"100%",maxHeight:"80vh",overflow:"auto",border:"1px solid #E5E7EB",boxShadow:"0 20px 60px rgba(0,0,0,0.15)"},
     textarea:{width:"100%",minHeight:200,background:"#F9FAFB",color:"#1A1A2E",border:"1px solid #D1D5DB",borderRadius:8,padding:12,fontSize:13,fontFamily:"monospace",resize:"vertical",outline:"none",boxSizing:"border-box"},
     input:{padding:"8px 12px",borderRadius:6,border:"1px solid #D1D5DB",background:"#F9FAFB",color:"#1A1A2E",fontSize:13,width:"100%",outline:"none",boxSizing:"border-box"},
-    vCard:(c)=>({padding:"12px 16px",margin:"0 12px 8px",borderRadius:8,border:"1px solid "+c+"30",background:c+"06",borderLeft:"4px solid "+c}),
-    vtag:(v)=>{const cs={"Jose Costa":"#D97706","Pianyi 1":"#2563EB","Pianyi 4":"#7C3AED","Benjamin":"#059669"};const c=cs[v]||"#6B7280";return{fontSize:11,color:c,fontWeight:600,marginLeft:8,padding:"1px 6px",borderRadius:4,background:c+"12"};},
+    vCard:c=>({padding:"12px 16px",margin:"0 12px 8px",borderRadius:8,border:"1px solid "+c+"30",background:c+"06",borderLeft:"4px solid "+c}),
+    vtag:v=>{const cs={"Jose Costa":"#D97706","Pianyi 1":"#2563EB","Pianyi 2":"#0891B2","Pianyi 3":"#7C3AED","Pianyi 4":"#7C3AED","Benjamin":"#059669","Alejandra":"#DB2777","Santiago":"#EA580C","Jeremias":"#4F46E5","Mingo":"#0D9488","Gerardo":"#B45309","Aly":"#9333EA","Stella Fernandez":"#E11D48","Ariel Tricariche":"#1D4ED8"};const c=cs[v]||"#6B7280";return{fontSize:11,color:c,fontWeight:600,marginLeft:8,padding:"1px 6px",borderRadius:4,background:c+"12"};},
   };
 
-  /* ── RENDER: Zonificación ── */
+  const renderItemRow = (order, item) => {
+    const isEd = editingItem && editingItem.orderId===order.id && editingItem.itemId===item.id;
+    if(isEd) return (
+      <div key={item.id} style={{padding:"4px 0",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",fontSize:12}}>
+        <input type="number" min={1} value={editingItem.qty} onChange={e=>setEditingItem(p=>({...p,qty:e.target.value}))} style={{width:45,padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12,textAlign:"center"}} />
+        <input value={editingItem.product} onChange={e=>setEditingItem(p=>({...p,product:e.target.value}))} style={{flex:1,minWidth:100,padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12}} />
+        <input type="number" value={editingItem.price} onChange={e=>setEditingItem(p=>({...p,price:e.target.value}))} style={{width:70,padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12,textAlign:"right"}} />
+        <select value={editingItem.vendor} onChange={e=>setEditingItem(p=>({...p,vendor:e.target.value}))} style={{padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12,background:"#F9FAFB"}}>
+          <option value="">Sin vendedor</option>
+          {VENDEDORES.map(v=><option key={v} value={v}>{v}</option>)}
+        </select>
+        <button onClick={saveEdit} style={{...S.btn("success"),padding:"3px 8px",fontSize:11}}>✓</button>
+        <button onClick={cancelEdit} style={{...S.btn(),padding:"3px 8px",fontSize:11}}>✕</button>
+      </div>
+    );
+    return (
+      <div key={item.id} style={{...S.itemRow,cursor:"pointer"}} onClick={()=>startEdit(order.id,item)} title="Click para editar">
+        <span><span style={{color:"#6B7280",marginRight:6}}>{item.qty}x</span>{item.product}{item.vendor && <span style={S.vtag(item.vendor)}>{item.vendor}</span>}</span>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{color:"#6B7280"}}>{fmt(item.price)}</span>
+          <button onClick={e=>{e.stopPropagation();deleteItem(order.id,item.id)}} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:11,padding:"0 2px"}}>✕</button>
+        </div>
+      </div>
+    );
+  };
+
+  // ZONIFICACIÓN TAB - shows ALL orders, painted when assigned
   const renderZonificacion = () => (
     <>
       <div style={S.toolbar}>
@@ -506,105 +357,75 @@ export default function Zonificacion() {
       </div>
       <div style={{padding:"8px 0"}}>
         {filteredZones.map(zone => {
-          const zOrds = (ordersByZone[zone]||[]).filter(o => {
-            if (!searchTerm) return true;
-            const t = searchTerm.toLowerCase();
+          const allOrds = (ordersByZone[zone]||[]).filter(o => {
+            if(o.status==="entregado") return false;
+            if(!searchTerm) return true;
+            const t=searchTerm.toLowerCase();
             return o.address.toLowerCase().includes(t)||o.localidad.toLowerCase().includes(t)||o.items.some(it=>it.product.toLowerCase().includes(t));
           });
           const zDebts = debtsByZone[zone]||[];
-          const debtsWithOrder = zDebts.filter(d => zOrds.some(o => normalizeAddr(o.address)===normalizeAddr(d.address)));
-          const debtsNoOrder = zDebts.filter(d => !zOrds.some(o => normalizeAddr(o.address)===normalizeAddr(d.address)));
-          const total = zOrds.length + debtsNoOrder.length;
+          const debtsWithOrder = zDebts.filter(d=>allOrds.some(o=>normalizeAddr(o.address)===normalizeAddr(d.address)));
+          const debtsNoOrder = zDebts.filter(d=>!allOrds.some(o=>normalizeAddr(o.address)===normalizeAddr(d.address)));
+          const total = allOrds.length + debtsNoOrder.length;
           const exp = expandedZones[zone];
-
           return (
             <div key={zone} style={S.zone}>
               <div style={S.zoneHead(total>0)} onClick={()=>toggleZone(zone)}>
                 <span style={{fontWeight:600,fontSize:14}}>{exp?"▼":"▶"} {zone}</span>
                 <div style={{display:"flex",gap:6}}>
-                  {zOrds.length>0 && <span style={S.badge("#3B82F6")}>{zOrds.length}</span>}
+                  {allOrds.length>0 && <span style={S.badge("#3B82F6")}>{allOrds.length}</span>}
                   {zDebts.length>0 && <span style={S.badge("#DC2626")}>{zDebts.length} deuda{zDebts.length>1?"s":""}</span>}
                 </div>
               </div>
-              {exp && (
-                <div>
-                  {zOrds.map(order => {
-                    const vc = VEHICLES.find(v=>v.id===order.vehicleId);
-                    const debt = debtsWithOrder.find(d=>normalizeAddr(d.address)===normalizeAddr(order.address));
-                    return (
-                      <div key={order.id} style={S.orderCard(vc?.color)}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            {order.status==="pending" && <input type="checkbox" checked={selectedOrders.has(order.id)} onChange={()=>toggleSelect(order.id)} style={{accentColor:"#3B82F6"}} />}
-                            <div>
-                              <div style={{fontWeight:600,fontSize:14}}>{order.address}</div>
-                              <div style={{fontSize:12,color:"#6B7280"}}>{order.localidad}{order.horario?` • ${order.horario}`:""}{order.status==="depurado"?<span style={{color:"#D97706",marginLeft:8}}>DEPURADO</span>:null}</div>
+              {exp && <div>
+                {allOrds.map(order => {
+                  const veh = VEHICLES.find(v=>v.id===order.vehicleId);
+                  const isAssigned = !!order.vehicleId;
+                  const debt = debtsWithOrder.find(d=>normalizeAddr(d.address)===normalizeAddr(order.address));
+                  return (
+                    <div key={order.id} style={S.orderCard(veh?.color)}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          {!isAssigned && order.status==="pending" && <input type="checkbox" checked={selectedOrders.has(order.id)} onChange={()=>toggleSelect(order.id)} style={{accentColor:"#3B82F6"}} />}
+                          <div>
+                            <div style={{fontWeight:600,fontSize:14}}>
+                              {order.address}
+                              {isAssigned && <span style={{...S.badge(veh?.color),marginLeft:8,fontSize:10}}>{veh?.name}</span>}
+                            </div>
+                            <div style={{fontSize:12,color:"#6B7280"}}>
+                              {order.localidad}{order.horario?` • ${order.horario}`:""}
+                              {order.status==="depurado" && <span style={{color:"#D97706",marginLeft:8,fontWeight:600}}>DEPURADO</span>}
                             </div>
                           </div>
-                          <button onClick={()=>deleteOrder(order.id)} style={{...S.btn("danger"),padding:"4px 8px",fontSize:11}}>✕</button>
                         </div>
-                        {debt && (
-                          <div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:6,padding:"6px 10px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                            <span style={S.debtBadge}>DEUDA PENDIENTE DE PAGO</span>
-                            <span style={{color:"#DC2626",fontWeight:700,fontSize:14}}>{fmt(debt.amount-debt.paid)}</span>
-                          </div>
-                        )}
-                        {order.items.map(item => {
-                          const isEditing = editingItem && editingItem.orderId===order.id && editingItem.itemId===item.id;
-                          if (isEditing) {
-                            return (
-                              <div key={item.id} style={{padding:"4px 0",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",fontSize:12}}>
-                                <input type="number" min={1} value={editingItem.qty} onChange={e=>setEditingItem(p=>({...p,qty:e.target.value}))} style={{width:45,padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12,textAlign:"center"}} />
-                                <input value={editingItem.product} onChange={e=>setEditingItem(p=>({...p,product:e.target.value}))} style={{flex:1,minWidth:100,padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12}} />
-                                <input type="number" value={editingItem.price} onChange={e=>setEditingItem(p=>({...p,price:e.target.value}))} style={{width:70,padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12,textAlign:"right"}} placeholder="$" />
-                                <select value={editingItem.vendor} onChange={e=>setEditingItem(p=>({...p,vendor:e.target.value}))} style={{padding:"3px 6px",border:"1px solid #D1D5DB",borderRadius:4,fontSize:12,background:"#F9FAFB"}}>
-                                  <option value="">Sin vendedor</option>
-                                  {VENDEDORES.map(v=><option key={v} value={v}>{v}</option>)}
-                                </select>
-                                <button onClick={saveEdit} style={{...S.btn("success"),padding:"3px 8px",fontSize:11}}>✓</button>
-                                <button onClick={cancelEdit} style={{...S.btn(),padding:"3px 8px",fontSize:11}}>✕</button>
-                              </div>
-                            );
-                          }
-                          return (
-                            <div key={item.id} style={{...S.itemRow,cursor:"pointer"}} onClick={()=>startEdit(order.id,item)} title="Click para editar">
-                              <span><span style={{color:"#6B7280",marginRight:6}}>{item.qty}x</span>{item.product}{item.vendor && <span style={S.vtag(item.vendor)}>{item.vendor}</span>}</span>
-                              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{color:"#6B7280"}}>{fmt(item.price)}</span>
-                                <button onClick={e=>{e.stopPropagation();deleteItem(order.id,item.id)}} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:11,padding:"0 2px"}}>✕</button>
-                              </div>
-                            </div>
-                          );
-                        })}
+                        {!isAssigned && <button onClick={()=>deleteOrder(order.id)} style={{...S.btn("danger"),padding:"4px 8px",fontSize:11}}>✕</button>}
                       </div>
-                    );
-                  })}
-                  {debtsNoOrder.length>0 && (
-                    <>
-                      <div style={S.debtGroupHead}>COBROS PENDIENTES SIN PEDIDO</div>
-                      {debtsNoOrder.map(d => (
-                        <div key={d.id} style={S.debtRow}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                            <div>
-                              <div style={{fontWeight:600,fontSize:14}}>{d.client}</div>
-                              <div style={{fontSize:12,color:"#6B7280"}}>{d.address} • {d.localidad}</div>
-                            </div>
-                            <div style={{display:"flex",alignItems:"center",gap:8}}>
-                              <div style={{textAlign:"right"}}>
-                                <span style={S.debtBadge}>DEUDA PENDIENTE DE PAGO</span>
-                                <div style={{color:"#DC2626",fontWeight:700,fontSize:16,marginTop:4}}>{fmt(d.amount-d.paid)}</div>
-                                {d.paid>0 && <div style={{fontSize:11,color:"#6B7280"}}>Pagó parcial: {fmt(d.paid)}</div>}
-                              </div>
-                              <button onClick={()=>deleteDebt(d.id)} style={{...S.btn("danger"),padding:"4px 8px",fontSize:11}}>✕</button>
-                            </div>
-                          </div>
+                      {debt && (
+                        <div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:6,padding:"6px 10px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span style={S.debtBadge}>DEUDA PENDIENTE DE PAGO</span>
+                          <span style={{color:"#DC2626",fontWeight:700,fontSize:14}}>{fmt(debt.amount-debt.paid)}</span>
                         </div>
-                      ))}
-                    </>
-                  )}
-                  {zOrds.length===0 && debtsNoOrder.length===0 && <div style={{padding:16,textAlign:"center",color:"#9CA3AF",fontSize:13}}>Sin pedidos ni cobros pendientes</div>}
-                </div>
-              )}
+                      )}
+                      {order.items.map(item => renderItemRow(order, item))}
+                    </div>
+                  );
+                })}
+                {debtsNoOrder.length>0 && <>
+                  <div style={S.debtGroupHead}>COBROS PENDIENTES SIN PEDIDO</div>
+                  {debtsNoOrder.map(d => (
+                    <div key={d.id} style={S.debtRow}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div><div style={{fontWeight:600,fontSize:14}}>{d.client}</div><div style={{fontSize:12,color:"#6B7280"}}>{d.address} • {d.localidad}</div></div>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <div style={{textAlign:"right"}}><span style={S.debtBadge}>DEUDA PENDIENTE DE PAGO</span><div style={{color:"#DC2626",fontWeight:700,fontSize:16,marginTop:4}}>{fmt(d.amount-d.paid)}</div>{d.paid>0&&<div style={{fontSize:11,color:"#6B7280"}}>Pagó parcial: {fmt(d.paid)}</div>}</div>
+                          <button onClick={()=>deleteDebt(d.id)} style={{...S.btn("danger"),padding:"4px 8px",fontSize:11}}>✕</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </>}
+                {allOrds.length===0 && debtsNoOrder.length===0 && <div style={{padding:16,textAlign:"center",color:"#9CA3AF",fontSize:13}}>Sin pedidos ni cobros pendientes</div>}
+              </div>}
             </div>
           );
         })}
@@ -612,12 +433,10 @@ export default function Zonificacion() {
     </>
   );
 
-  /* ── RENDER: Pedidos en calle ── */
+  // PEDIDOS EN CALLE TAB - with depuration
   const renderEnCalle = () => (
     <div style={{padding:"12px 0"}}>
-      {Object.keys(streetByVehicle).length===0 ? (
-        <div style={{textAlign:"center",padding:40,color:"#6B7280"}}>No hay pedidos en calle</div>
-      ) : (
+      {Object.keys(streetByVehicle).length===0 ? <div style={{textAlign:"center",padding:40,color:"#6B7280"}}>No hay pedidos en calle</div> : (
         Object.entries(streetByVehicle).map(([vid,vOrds]) => {
           const veh = VEHICLES.find(v=>v.id===vid);
           return (
@@ -632,7 +451,9 @@ export default function Zonificacion() {
                   <button style={S.btn("danger")} onClick={()=>deleteVehicle(vid)}>Eliminar camioneta</button>
                 </div>
               </div>
-              {vOrds.map((order,idx) => (
+              {vOrds.map((order,idx) => {
+                const isDepurating = depuratingOrder?.id === order.id;
+                return (
                 <div key={order.id} style={{padding:"8px 0",borderTop:"1px solid #E5E7EB"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -646,19 +467,36 @@ export default function Zonificacion() {
                         <div style={{fontSize:12,color:"#6B7280"}}>{order.localidad}{order.horario?` • ${order.horario}`:""}</div>
                       </div>
                     </div>
-                    <div style={{display:"flex",gap:4}}>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                      <button onClick={()=>depurateTotal(order.id)} style={{...S.btn("success"),padding:"4px 8px",fontSize:11}}>✓ Entregado</button>
+                      <button onClick={()=>setDepuratingOrder(isDepurating?null:{id:order.id,items:Object.fromEntries(order.items.map(i=>[i.id,i.qty]))})} style={{...S.btn("warning"),padding:"4px 8px",fontSize:11}}>{isDepurating?"Cancelar":"Parcial"}</button>
+                      <button onClick={()=>depurateReject(order.id)} style={{...S.btn(),padding:"4px 8px",fontSize:11}}>✗ Rechazo</button>
                       <button onClick={()=>returnToZone(order.id)} style={{...S.btn(),padding:"4px 8px",fontSize:11}}>↩ Volver</button>
-                      <button onClick={()=>deleteOrder(order.id)} style={{...S.btn("danger"),padding:"4px 8px",fontSize:11}}>✕</button>
                     </div>
                   </div>
-                  {order.items.map(item => (
-                    <div key={item.id} style={{...S.itemRow,paddingLeft:52}}>
-                      <span><span style={{color:"#6B7280"}}>{item.qty}x</span> {item.product}{item.vendor && <span style={S.vtag(item.vendor)}>{item.vendor}</span>}</span>
-                      <span style={{color:"#6B7280"}}>{fmt(item.price)}</span>
+                  {isDepurating ? (
+                    <div style={{marginTop:8,padding:8,background:"#FFFBEB",borderRadius:6,border:"1px solid #FDE68A"}}>
+                      <div style={{fontSize:12,fontWeight:600,color:"#92400E",marginBottom:6}}>Depuración parcial — ajustá las cantidades entregadas:</div>
+                      {order.items.map(item => (
+                        <div key={item.id} style={{display:"flex",alignItems:"center",gap:8,padding:"3px 0",fontSize:13}}>
+                          <input type="number" min={0} max={item.qty} value={depuratingOrder.items[item.id]??item.qty} onChange={e=>{const v=Math.min(parseInt(e.target.value)||0,item.qty);setDepuratingOrder(p=>({...p,items:{...p.items,[item.id]:v}}));}} style={{width:45,padding:"3px",border:"1px solid #D1D5DB",borderRadius:4,textAlign:"center",fontSize:12}} />
+                          <span style={{color:"#6B7280"}}>/ {item.qty}</span>
+                          <span>{item.product}</span>
+                          {item.vendor && <span style={S.vtag(item.vendor)}>{item.vendor}</span>}
+                        </div>
+                      ))}
+                      <button onClick={()=>depuratePartialConfirm(order.id,depuratingOrder.items)} style={{...S.btn("warning"),marginTop:8,fontSize:12}}>Confirmar parcial</button>
                     </div>
-                  ))}
+                  ) : (
+                    order.items.map(item => (
+                      <div key={item.id} style={{...S.itemRow,paddingLeft:52}}>
+                        <span><span style={{color:"#6B7280"}}>{item.qty}x</span> {item.product}{item.vendor && <span style={S.vtag(item.vendor)}>{item.vendor}</span>}</span>
+                        <span style={{color:"#6B7280"}}>{fmt(item.price)}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
-              ))}
+              );})}
             </div>
           );
         })
@@ -666,17 +504,17 @@ export default function Zonificacion() {
     </div>
   );
 
-  /* ── RENDER: Reporte ── */
+  // REPORTE TAB
   const renderReporte = () => {
-    const byV = {};
-    for (const o of orders) if (o.status==="preparando"||o.status==="en_calle") { (byV[o.vehicleId||"sin"]||(byV[o.vehicleId||"sin"]=[])).push(o); }
+    const byV={};
+    for(const o of orders) if(o.vehicleId&&(o.status==="preparando"||o.status==="en_calle"||o.status==="entregado")) (byV[o.vehicleId]||(byV[o.vehicleId]=[])).push(o);
     return (
       <div style={{padding:"12px 0"}}>
         <div style={{padding:"0 20px 12px",fontSize:13,color:"#6B7280"}}>Reporte segmentado por camioneta</div>
-        {Object.keys(byV).length===0 ? <div style={{textAlign:"center",padding:40,color:"#6B7280"}}>Sin datos</div> : (
-          Object.entries(byV).map(([vid,vOrds]) => {
-            const veh = VEHICLES.find(v=>v.id===vid);
-            return (
+        {Object.keys(byV).length===0?<div style={{textAlign:"center",padding:40,color:"#6B7280"}}>Sin datos</div>:(
+          Object.entries(byV).map(([vid,vOrds])=>{
+            const veh=VEHICLES.find(v=>v.id===vid);
+            return(
               <div key={vid} style={{margin:"0 12px 12px",borderRadius:8,border:"1px solid #E5E7EB",overflow:"hidden"}}>
                 <div style={{padding:"10px 16px",background:"#F3F4F6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontWeight:700,fontSize:15}}>{veh?.name||"Sin asignar"}</span>
@@ -685,10 +523,10 @@ export default function Zonificacion() {
                     <button onClick={()=>deleteVehicle(vid)} style={{...S.btn("danger"),padding:"4px 8px",fontSize:11}}>Eliminar camioneta</button>
                   </div>
                 </div>
-                {vOrds.map(o => (
+                {vOrds.map(o=>(
                   <div key={o.id} style={{padding:"8px 16px",borderTop:"1px solid #E5E7EB",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
-                      <div style={{fontWeight:500,fontSize:13}}>{o.address} — {o.localidad}</div>
+                      <div style={{fontWeight:500,fontSize:13}}>{o.address} — {o.localidad} {o.status==="entregado"&&<span style={{color:"#059669",fontSize:11,fontWeight:700}}>✓ ENTREGADO</span>}{o.status==="depurado"&&<span style={{color:"#D97706",fontSize:11,fontWeight:700}}>DEPURADO</span>}</div>
                       <div style={{fontSize:12,color:"#6B7280"}}>{o.items.length} artículo{o.items.length>1?"s":""}</div>
                     </div>
                     <button onClick={()=>deleteOrder(o.id)} style={{...S.btn("danger"),padding:"4px 8px",fontSize:11}}>✕</button>
@@ -702,16 +540,7 @@ export default function Zonificacion() {
     );
   };
 
-  const handleReset = () => {
-    if (!confirm("¿Borrar TODOS los pedidos y cobros pendientes? Esta acción no se puede deshacer.")) return;
-    setOrders([]);
-    setDebts([]);
-    try { localStorage.removeItem("pianyi_zon_orders"); } catch(e) {}
-    try { localStorage.removeItem("pianyi_zon_debts"); } catch(e) {}
-  };
-
-  /* ── MAIN RENDER ── */
-  if (!loaded) return <div style={{...S.app,display:"flex",alignItems:"center",justifyContent:"center",height:"100vh"}}><span style={{fontSize:16,color:"#6B7280"}}>Cargando datos...</span></div>;
+  if(!loaded) return <div style={{...S.app,display:"flex",alignItems:"center",justifyContent:"center",height:"100vh"}}><span style={{fontSize:16,color:"#6B7280"}}>Cargando datos...</span></div>;
 
   return (
     <div style={S.app}>
@@ -731,89 +560,56 @@ export default function Zonificacion() {
       {activeTab==="en_calle" && renderEnCalle()}
       {activeTab==="reporte" && renderReporte()}
 
-      {/* Modal: Pegar pedidos */}
-      {showPaste && (
-        <div style={S.modal} onClick={()=>setShowPaste(false)}>
-          <div style={S.modalBox} onClick={e=>e.stopPropagation()}>
-            <h3 style={{margin:"0 0 12px",fontSize:18}}>Pegar pedidos de WhatsApp</h3>
-            <p style={{fontSize:13,color:"#6B7280",margin:"0 0 12px"}}>Pegá los pedidos del grupo. El sistema detecta dirección, localidad, horario, vendedor y artículos. Si hay duplicados, te muestra la fusión antes de confirmar.</p>
-            <textarea style={S.textarea} placeholder={"Ej:\n24/7 murguiondo 639 Liniers 0930 a 14\nPianyi 4\n3 imperial Golden $1599\n2 Heineken sin alcohol $1875"} value={pasteText} onChange={e=>setPasteText(e.target.value)} />
-            <div style={{display:"flex",gap:8,marginTop:12,alignItems:"center"}}>
-              <button style={S.btn("primary")} onClick={handleParse}>Procesar</button>
-              <button style={S.btn()} onClick={()=>{setShowPaste(false);setParseResult(null)}}>Cancelar</button>
-              {parseResult && <span style={{fontSize:13,color:parseResult.includes("No se")?"#DC2626":"#059669",fontWeight:600}}>{parseResult}</span>}
-            </div>
-          </div>
+      {showPaste && <div style={S.modal} onClick={()=>setShowPaste(false)}><div style={S.modalBox} onClick={e=>e.stopPropagation()}>
+        <h3 style={{margin:"0 0 12px",fontSize:18}}>Pegar pedidos de WhatsApp</h3>
+        <p style={{fontSize:13,color:"#6B7280",margin:"0 0 12px"}}>Pegá los pedidos del grupo. Si hay duplicados te muestra la fusión.</p>
+        <textarea style={S.textarea} placeholder={"Ej:\n24/7 Ontiveros 4534 Villa Tesei 09 a 13:30hs\nAlejandra\n5 novecento malbec $1.925"} value={pasteText} onChange={e=>setPasteText(e.target.value)} />
+        <div style={{display:"flex",gap:8,marginTop:12,alignItems:"center"}}>
+          <button style={S.btn("primary")} onClick={handleParse}>Procesar</button>
+          <button style={S.btn()} onClick={()=>{setShowPaste(false);setParseResult(null)}}>Cancelar</button>
+          {parseResult && <span style={{fontSize:13,color:parseResult.includes("No se")?"#DC2626":"#059669",fontWeight:600}}>{parseResult}</span>}
         </div>
-      )}
+      </div></div>}
 
-      {/* Modal: Merge conflicts */}
-      {mergeInfo && (
-        <div style={S.modal}>
-          <div style={S.modalBox} onClick={e=>e.stopPropagation()}>
-            <h3 style={{margin:"0 0 12px",fontSize:18,color:"#D97706"}}>Pedidos duplicados detectados</h3>
-            <p style={{fontSize:13,color:"#6B7280",margin:"0 0 16px"}}>
-              {mergeInfo.conflicts.length} cliente{mergeInfo.conflicts.length>1?"s":""} con pedido existente. Se fusionan: cantidad más alta + precio más alto, vendedor ganador por línea.
-            </p>
-            {mergeInfo.conflicts.map((c,i) => (
-              <div key={i} style={{padding:12,background:"#F9FAFB",borderRadius:8,marginBottom:8,border:"1px solid #E5E7EB"}}>
-                <div style={{fontWeight:600,marginBottom:6}}>{c.existing.address} — {c.existing.localidad}</div>
-                <div style={{fontSize:12,color:"#6B7280",marginBottom:4}}>Resultado fusionado:</div>
-                {c.merged.map(item => (
-                  <div key={item.id} style={S.itemRow}>
-                    <span>{item.qty}x {item.product}{item.vendor && <span style={S.vtag(item.vendor)}>{item.vendor}</span>}</span>
-                    <span style={{color:"#6B7280"}}>{fmt(item.price)}</span>
-                  </div>
-                ))}
-              </div>
-            ))}
-            {mergeInfo.clean.length>0 && <p style={{fontSize:12,color:"#6B7280",marginTop:8}}>+ {mergeInfo.clean.length} pedido{mergeInfo.clean.length>1?"s":""} nuevo{mergeInfo.clean.length>1?"s":""} sin conflicto</p>}
-            <div style={{display:"flex",gap:8,marginTop:12}}>
-              <button style={S.btn("success")} onClick={handleConfirmMerge}>Confirmar fusión</button>
-              <button style={S.btn()} onClick={()=>setMergeInfo(null)}>Cancelar</button>
-            </div>
+      {mergeInfo && <div style={S.modal}><div style={S.modalBox} onClick={e=>e.stopPropagation()}>
+        <h3 style={{margin:"0 0 12px",fontSize:18,color:"#D97706"}}>Pedidos duplicados detectados</h3>
+        <p style={{fontSize:13,color:"#6B7280",margin:"0 0 16px"}}>{mergeInfo.conflicts.length} cliente{mergeInfo.conflicts.length>1?"s":""} con pedido existente.</p>
+        {mergeInfo.conflicts.map((c,i)=>{const ex=orders.find(o=>o.id===c.existingId);return(
+          <div key={i} style={{padding:12,background:"#F9FAFB",borderRadius:8,marginBottom:8,border:"1px solid #E5E7EB"}}>
+            <div style={{fontWeight:600,marginBottom:6}}>{ex?.address} — {ex?.localidad}</div>
+            {c.merged.map(item=><div key={item.id} style={S.itemRow}><span>{item.qty}x {item.product}{item.vendor&&<span style={S.vtag(item.vendor)}>{item.vendor}</span>}</span><span style={{color:"#6B7280"}}>{fmt(item.price)}</span></div>)}
           </div>
+        );})}
+        {mergeInfo.clean.length>0&&<p style={{fontSize:12,color:"#6B7280"}}>+ {mergeInfo.clean.length} pedido{mergeInfo.clean.length>1?"s":""} nuevo{mergeInfo.clean.length>1?"s":""}</p>}
+        <div style={{display:"flex",gap:8,marginTop:12}}>
+          <button style={S.btn("success")} onClick={handleConfirmMerge}>Confirmar fusión</button>
+          <button style={S.btn()} onClick={()=>setMergeInfo(null)}>Cancelar</button>
         </div>
-      )}
+      </div></div>}
 
-      {/* Modal: Asignar camioneta */}
-      {showAssign && (
-        <div style={S.modal} onClick={()=>setShowAssign(false)}>
-          <div style={S.modalBox} onClick={e=>e.stopPropagation()}>
-            <h3 style={{margin:"0 0 16px",fontSize:18}}>Asignar a camioneta</h3>
-            <div style={{display:"grid",gap:8}}>
-              {VEHICLES.map(v => (
-                <button key={v.id} onClick={()=>handleAssign(v.id)} style={{...S.btn(),padding:"12px 16px",textAlign:"left",borderLeft:"4px solid "+v.color,display:"flex",justifyContent:"space-between"}}>
-                  <span style={{fontWeight:600}}>{v.name}</span>
-                  <span style={{color:"#6B7280"}}>{(streetByVehicle[v.id]||[]).length} asignados</span>
-                </button>
-              ))}
-            </div>
-          </div>
+      {showAssign && <div style={S.modal} onClick={()=>setShowAssign(false)}><div style={S.modalBox} onClick={e=>e.stopPropagation()}>
+        <h3 style={{margin:"0 0 16px",fontSize:18}}>Asignar a camioneta</h3>
+        <div style={{display:"grid",gap:8}}>
+          {VEHICLES.map(v=><button key={v.id} onClick={()=>handleAssign(v.id)} style={{...S.btn(),padding:"12px 16px",textAlign:"left",borderLeft:"4px solid "+v.color,display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:600}}>{v.name}</span><span style={{color:"#6B7280"}}>{(streetByVehicle[v.id]||[]).length} asignados</span></button>)}
         </div>
-      )}
+      </div></div>}
 
-      {/* Modal: Cobro pendiente */}
-      {showDebt && (
-        <div style={S.modal} onClick={()=>setShowDebt(false)}>
-          <div style={S.modalBox} onClick={e=>e.stopPropagation()}>
-            <h3 style={{margin:"0 0 16px",fontSize:18}}>Agregar cobro pendiente</h3>
-            <div style={{display:"grid",gap:10}}>
-              <input style={S.input} placeholder="Cliente" value={newDebt.client} onChange={e=>setNewDebt(p=>({...p,client:e.target.value}))} />
-              <input style={S.input} placeholder="Dirección" value={newDebt.address} onChange={e=>setNewDebt(p=>({...p,address:e.target.value}))} />
-              <input style={S.input} placeholder="Localidad" value={newDebt.localidad} onChange={e=>setNewDebt(p=>({...p,localidad:e.target.value}))} />
-              <div style={{display:"flex",gap:10}}>
-                <input style={S.input} placeholder="Monto total" type="number" value={newDebt.amount} onChange={e=>setNewDebt(p=>({...p,amount:e.target.value}))} />
-                <input style={S.input} placeholder="Pagó (parcial)" type="number" value={newDebt.paid} onChange={e=>setNewDebt(p=>({...p,paid:e.target.value}))} />
-              </div>
-              <div style={{display:"flex",gap:8,marginTop:4}}>
-                <button style={S.btn("primary")} onClick={addDebt}>Agregar</button>
-                <button style={S.btn()} onClick={()=>setShowDebt(false)}>Cancelar</button>
-              </div>
-            </div>
+      {showDebt && <div style={S.modal} onClick={()=>setShowDebt(false)}><div style={S.modalBox} onClick={e=>e.stopPropagation()}>
+        <h3 style={{margin:"0 0 16px",fontSize:18}}>Agregar cobro pendiente</h3>
+        <div style={{display:"grid",gap:10}}>
+          <input style={S.input} placeholder="Cliente" value={newDebt.client} onChange={e=>setNewDebt(p=>({...p,client:e.target.value}))} />
+          <input style={S.input} placeholder="Dirección" value={newDebt.address} onChange={e=>setNewDebt(p=>({...p,address:e.target.value}))} />
+          <input style={S.input} placeholder="Localidad" value={newDebt.localidad} onChange={e=>setNewDebt(p=>({...p,localidad:e.target.value}))} />
+          <div style={{display:"flex",gap:10}}>
+            <input style={S.input} placeholder="Monto total" type="number" value={newDebt.amount} onChange={e=>setNewDebt(p=>({...p,amount:e.target.value}))} />
+            <input style={S.input} placeholder="Pagó (parcial)" type="number" value={newDebt.paid} onChange={e=>setNewDebt(p=>({...p,paid:e.target.value}))} />
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:4}}>
+            <button style={S.btn("primary")} onClick={addDebt}>Agregar</button>
+            <button style={S.btn()} onClick={()=>setShowDebt(false)}>Cancelar</button>
           </div>
         </div>
-      )}
+      </div></div>}
     </div>
   );
 }
