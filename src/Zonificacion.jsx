@@ -123,7 +123,22 @@ export default function Zonificacion() {
   const [editingItem, setEditingItem] = useState(null);
   const [depuratingOrder, setDepuratingOrder] = useState(null);
   const [parseResult, setParseResult] = useState(null);
-  const [motivoModal, setMotivoModal] = useState(null); // {orderId, action:"rechazado"|"devuelto", motivo:""}
+  const [motivoModal, setMotivoModal] = useState(null);
+  const [routeModal, setRouteModal] = useState(null); // {vehicleId, origin, destination, routing:false}
+  const [routeStatus, setRouteStatus] = useState("");
+  const [mapsLoaded, setMapsLoaded] = useState(false);
+
+  // Load Google Maps JS API
+  useEffect(() => {
+    const apiKey = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_GOOGLE_MAPS_KEY : '';
+    if (!apiKey || mapsLoaded || document.getElementById('gmaps-script')) return;
+    const script = document.createElement('script');
+    script.id = 'gmaps-script';
+    script.src = 'https://maps.googleapis.com/maps/api/js?key='+apiKey+'&libraries=places';
+    script.async = true;
+    script.onload = () => setMapsLoaded(true);
+    document.head.appendChild(script);
+  }, []); // {orderId, action:"rechazado"|"devuelto", motivo:""}
 
   useEffect(() => {
     try { const s=localStorage.getItem("pianyi_zon_orders"); if(s) setOrders(JSON.parse(s)); } catch(e){}
@@ -219,6 +234,109 @@ export default function Zonificacion() {
       return updated;
     });
     setDepuratingOrder(null);
+  };
+
+  // Automatic routing with Google
+  function parseClosingTime(horario) {
+    if (!horario) return 14;
+    const h = horario.toLowerCase().replace(/hs/g,"").replace(/\./g,":").trim();
+    // "no cierra" or "9 a 21" type = late closer
+    if (h.includes("no cierra") || h.includes("corrido")) return 99;
+    // Find the closing part: "9 a 14" → 14, "9-13:30" → 13.5, "9 a 21" → 21
+    const match = h.match(/(?:a|-)[\s]*(\d{1,2})(?::(\d{2}))?/);
+    if (match) {
+      const hr = parseInt(match[1]);
+      const min = match[2] ? parseInt(match[2]) : 0;
+      const closeTime = hr + min/60;
+      // Handle "0930 a 14" style where first part is 0930
+      return closeTime > 0 ? closeTime : 14;
+    }
+    // Single number like "21" → treat as close time
+    const single = h.match(/(\d{1,2})(?::(\d{2}))?/);
+    if (single) {
+      const hr = parseInt(single[1]);
+      if (hr > 14) return hr;
+    }
+    return 14; // default
+  }
+
+  function getCloseCategory(closeTime) {
+    if (closeTime <= 14) return "early"; // closes at 14 or before → priority
+    return "noclose"; // stays open after 14 → goes after
+  }
+
+  const runAutoRoute = async (vehicleId, origin, destination) => {
+    if (!window.google || !window.google.maps) { setRouteStatus("Error: Google Maps no cargó. Recargá la página."); return; }
+    const vOrds = orders.filter(o=>o.vehicleId===vehicleId&&(o.status==="preparando"||o.status==="en_calle"));
+    if (vOrds.length < 2) { setRouteStatus("Se necesitan al menos 2 pedidos para rutear."); return; }
+    if (vOrds.length > 25) { setRouteStatus("Google permite máximo 25 paradas. Reducí los pedidos."); return; }
+
+    setRouteStatus("Calculando ruta óptima...");
+
+    const classified = vOrds.map(o => ({...o, closeTime: parseClosingTime(o.horario), category: getCloseCategory(parseClosingTime(o.horario))}));
+    const earlyOrders = classified.filter(o => o.category === "early").sort((a,b) => a.closeTime - b.closeTime);
+    const noCloseOrders = classified.filter(o => o.category === "noclose");
+
+    // Priority order: early closers first, then mid, then no-close
+    const sortedOrds = [...earlyOrders, ...noCloseOrders];
+    const waypoints = sortedOrds.map(o => ({
+      location: o.address + ", " + o.localidad + ", Buenos Aires, Argentina",
+      stopover: true
+    }));
+
+    try {
+      const directionsService = new window.google.maps.DirectionsService();
+      const result = await new Promise((resolve, reject) => {
+        directionsService.route({
+          origin: origin + ", Buenos Aires, Argentina",
+          destination: destination + ", Buenos Aires, Argentina",
+          waypoints: waypoints,
+          optimizeWaypoints: true,
+          travelMode: window.google.maps.TravelMode.DRIVING,
+          region: 'ar'
+        }, (response, status) => {
+          if (status === 'OK') resolve(response);
+          else reject(new Error("Error de Google: " + status));
+        });
+      });
+
+      const waypointOrder = result.routes[0].waypoint_order;
+      const reorderedIds = waypointOrder.map(i => sortedOrds[i].id);
+      const legs = result.routes[0].legs;
+      const totalKm = Math.round(legs.reduce((s,l) => s + l.distance.value, 0) / 1000);
+      const totalMin = Math.round(legs.reduce((s,l) => s + l.duration.value, 0) / 60);
+
+      // Check alerts for no-close orders that end up far from the route
+      let alerts = [];
+      noCloseOrders.forEach(nco => {
+        const posInRoute = waypointOrder.indexOf(sortedOrds.indexOf(nco));
+        if (posInRoute >= 0 && posInRoute < legs.length) {
+          const legDuration = Math.round(legs[posInRoute].duration.value / 60);
+          if (legDuration > 25) {
+            alerts.push(nco.address + " (" + nco.localidad + "): hacerlo post 14hs suma " + legDuration + " min de recorrido. Evaluar si conviene incluirlo en el orden regular.");
+          }
+        }
+      });
+
+      // Apply the new order
+      setOrders(prev => {
+        const all = [...prev];
+        const vIndices = all.reduce((ac,o,i) => {
+          if (o.vehicleId===vehicleId && (o.status==="preparando"||o.status==="en_calle")) ac.push(i);
+          return ac;
+        }, []);
+        const reorderedOrders = reorderedIds.map(id => all[vIndices.find(i => all[i].id === id)]);
+        for (let j=0; j<vIndices.length; j++) all[vIndices[j]] = reorderedOrders[j];
+        return all;
+      });
+
+      let statusMsg = "Ruta optimizada: " + totalKm + " km, ~" + totalMin + " min. " + vOrds.length + " paradas.";
+      if (alerts.length > 0) statusMsg += "\n⚠ ALERTAS:\n" + alerts.join("\n");
+      setRouteStatus(statusMsg);
+      if (alerts.length === 0) setTimeout(() => { setRouteModal(null); setRouteStatus(""); }, 3000);
+    } catch (err) {
+      setRouteStatus("Error: " + err.message);
+    }
   };
 
   const moveOrder = (vid,oid,dir) => {
@@ -457,9 +575,10 @@ export default function Zonificacion() {
                   <span style={{fontWeight:700,fontSize:16}}>{veh?.name||"Sin asignar"}</span>
                   <span style={{...S.badge(veh?.color),marginLeft:8}}>{vOrds.length} pedido{vOrds.length>1?"s":""}</span>
                 </div>
-                <div style={{display:"flex",gap:6}}>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <button style={S.btn("success")} onClick={()=>setRouteModal({vehicleId:vid,origin:"Cañada de Juan Ruiz 716, Morón",destination:"Cañada de Juan Ruiz 716, Morón",routing:false})}>🗺 Ruteo auto</button>
                   <button style={S.btn("primary")} onClick={()=>printHDR(vid)}>🖨 Imprimir HDR</button>
-                  <button style={S.btn("warning")} onClick={()=>unassignVehicle(vid)}>↩ Desasignar camioneta</button>
+                  <button style={S.btn("warning")} onClick={()=>unassignVehicle(vid)}>↩ Desasignar</button>
                 </div>
               </div>
               {vOrds.map((order,idx) => {
@@ -638,6 +757,28 @@ export default function Zonificacion() {
         <div style={{display:"flex",gap:8,marginTop:12}}>
           <button style={S.btn(motivoModal.action==="rechazado"?"danger":"warning")} onClick={confirmMotivo}>{motivoModal.action==="rechazado"?"Confirmar rechazo":"Confirmar devolución"}</button>
           <button style={S.btn()} onClick={()=>setMotivoModal(null)}>Cancelar</button>
+        </div>
+      </div></div>}
+
+      {routeModal && <div style={S.modal}><div style={S.modalBox} onClick={e=>e.stopPropagation()}>
+        <h3 style={{margin:"0 0 12px",fontSize:18,color:"#059669"}}>Ruteo automático</h3>
+        <p style={{fontSize:13,color:"#6B7280",margin:"0 0 16px"}}>Optimiza el orden de las paradas priorizando el horario de cierre de cada cliente. Podés cambiar el origen y destino si esta camioneta tiene que pasar por otro lado.</p>
+        <div style={{display:"grid",gap:10}}>
+          <div>
+            <label style={{fontSize:12,color:"#6B7280",marginBottom:4,display:"block"}}>Dirección de origen</label>
+            <input style={S.input} value={routeModal.origin} onChange={e=>setRouteModal(p=>({...p,origin:e.target.value}))} />
+          </div>
+          <div>
+            <label style={{fontSize:12,color:"#6B7280",marginBottom:4,display:"block"}}>Dirección de destino</label>
+            <input style={S.input} value={routeModal.destination} onChange={e=>setRouteModal(p=>({...p,destination:e.target.value}))} />
+          </div>
+        </div>
+        {routeStatus && <div style={{marginTop:12,padding:"8px 12px",background:routeStatus.includes("Error")?"#FEF2F2":routeStatus.includes("ALERTAS")?"#FFFBEB":routeStatus.includes("optimizada")?"#F0FDF4":"#FFFBEB",borderRadius:6,fontSize:13,color:routeStatus.includes("Error")?"#DC2626":routeStatus.includes("ALERTAS")?"#92400E":routeStatus.includes("optimizada")?"#059669":"#92400E",fontWeight:500,whiteSpace:"pre-line"}}>{routeStatus}</div>}
+        <div style={{display:"flex",gap:8,marginTop:16}}>
+          <button style={S.btn("success")} disabled={routeStatus==="Calculando ruta óptima..."} onClick={()=>runAutoRoute(routeModal.vehicleId,routeModal.origin,routeModal.destination)}>
+            {routeStatus==="Calculando ruta óptima..."?"Calculando...":"Calcular ruta óptima"}
+          </button>
+          <button style={S.btn()} onClick={()=>{setRouteModal(null);setRouteStatus("")}}>Cerrar</button>
         </div>
       </div></div>}
     </div>
