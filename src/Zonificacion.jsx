@@ -17,7 +17,12 @@ const ZONES = {
   "ZONA SUR 4":["Adrogué","Alejandro Korn","Burzaco","Carlos Segazzini","Canning","Cañuelas","El Jagüel","Esteban Echeverría","Ezeiza","Glew","Guernica","La Unión","Llavallol","Longchamps","Luis Guillón","Malvinas Argentinas","Monte Grande","San Vicente","Tristán Suárez","Turdera"],
   "ZONA SUR 5":["Berisso","Brandsen","City Bell","Ensenada","Gonnet","La Plata","Lisandro Olmos","Melchor Romero","Ringuelet","Villa Elisa","Villa Elvira","Tolosa"],
 };
-const VENDEDORES = ["Jose Costa","Pianyi 1","Pianyi 4","Benjamin"];
+const VENDEDORES = ["Alejandra","Benjamin","Santiago","Pianyi 1","Pianyi 2","Pianyi 3","Pianyi 4","Jeremias","Jose Costa","Mingo","Gerardo","Aly","Stella Fernandez","Ariel Tricariche"];
+const VENDOR_ALIASES = {
+  "jeremías":"Jeremias","jeremias":"Jeremias",
+  "gera":"Gerardo","gerar":"Gerardo","gerardo":"Gerardo",
+  "ali":"Aly","aly":"Aly",
+};
 const VEHICLES = [
   {id:"t1",name:"Transit 1",color:"#3B82F6"},{id:"t2",name:"Transit 2",color:"#10B981"},
   {id:"t3",name:"Transit 3",color:"#F59E0B"},{id:"t4",name:"Transit 4",color:"#EF4444"},
@@ -75,7 +80,15 @@ function parseWhatsApp(text) {
   var cur = null;
 
   function isVendor(line) {
-    return VENDEDORES.some(function(v){return v.toLowerCase()===line.toLowerCase()});
+    var low = line.toLowerCase();
+    if (VENDOR_ALIASES[low]) return true;
+    return VENDEDORES.some(function(v){return v.toLowerCase()===low});
+  }
+  function resolveVendor(line) {
+    var low = line.toLowerCase();
+    if (VENDOR_ALIASES[low]) return VENDOR_ALIASES[low];
+    var found = VENDEDORES.find(function(v){return v.toLowerCase()===low});
+    return found || line;
   }
   function isSkip(line) {
     return /^pas[oó]\s+/i.test(line);
@@ -104,10 +117,12 @@ function parseWhatsApp(text) {
   for (var i=0;i<lines.length;i++) {
     var line = lines[i];
     if (isSkip(line)) continue;
+    // Known vendor from list or alias
     if (isVendor(line)) {
-      if (cur) cur.vendor = VENDEDORES.find(function(v){return v.toLowerCase()===line.toLowerCase()});
+      if (cur) cur.vendor = resolveVendor(line);
       continue;
     }
+    // Single name that's NOT a vendor — store as contact note, not vendor
     if (isSingleName(line) && cur && !hasStreetNumber(line)) {
       cur.contactName = line;
       continue;
@@ -215,13 +230,17 @@ export default function Zonificacion() {
   // Auto-save orders when they change
   useEffect(() => {
     if (!loaded) return;
-    try { window.storage.set("zonificacion:orders", JSON.stringify(orders)); } catch(e) {}
+    (async () => {
+      try { await window.storage.set("zonificacion:orders", JSON.stringify(orders)); } catch(e) { console.error("save orders failed", e); }
+    })();
   }, [orders, loaded]);
 
   // Auto-save debts when they change
   useEffect(() => {
     if (!loaded) return;
-    try { window.storage.set("zonificacion:debts", JSON.stringify(debts)); } catch(e) {}
+    (async () => {
+      try { await window.storage.set("zonificacion:debts", JSON.stringify(debts)); } catch(e) { console.error("save debts failed", e); }
+    })();
   }, [debts, loaded]);
 
   /* ── Grouped data ── */
