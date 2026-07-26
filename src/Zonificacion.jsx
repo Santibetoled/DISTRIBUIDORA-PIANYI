@@ -69,111 +69,102 @@ function mergeItems(existing, incoming) {
 
 /* ── PARSER ── */
 function parseWhatsApp(text) {
-  // Clean up WhatsApp formatting: remove invisible chars, normalize spaces
-  const raw = text.replace(/\r/g,"").replace(/\u00A0/g," ").replace(/\u200B/g,"");
-  const lines = raw.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-  const orders = [];
-  let cur = null;
-
-  function isItem(line) {
-    // Matches: "3 imperial Golden $1599" or "3 imperial Golden 1599" or "3 imperial Golden $1.599"
-    return /^\d+\s+.+\s+\$?\s*[\d.,]+\s*$/.test(line);
-  }
+  var raw = text.replace(/\r/g,"").replace(/\u00A0/g," ").replace(/\u200B/g,"");
+  var lines = raw.split("\n").map(function(l){return l.trim()}).filter(function(l){return l.length>0});
+  var orders = [];
+  var cur = null;
 
   function isVendor(line) {
-    return VENDEDORES.some(v => v.toLowerCase() === line.toLowerCase());
+    return VENDEDORES.some(function(v){return v.toLowerCase()===line.toLowerCase()});
   }
-
   function isSkip(line) {
-    return /^pas[oó]\s+/i.test(line) || /^pasó\s*/i.test(line);
+    return /^pas[oó]\s+/i.test(line);
   }
-
+  function hasStreetNumber(line) {
+    return /\d{3,5}/.test(line);
+  }
+  function isSingleName(line) {
+    return /^[a-záéíóúüñA-ZÁÉÍÓÚÜÑ\s]{2,30}$/.test(line) && !/\d/.test(line) && line.split(/\s+/).length<=3;
+  }
+  function startsWithQty(line) {
+    return /^\d+\s+[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/i.test(line);
+  }
   function parseItem(line) {
-    const m = line.match(/^(\d+)\s+(.+?)\s+\$?\s*([\d.,]+)\s*$/);
-    if (!m) return null;
-    return {
-      id: uid(),
-      qty: parseInt(m[1]),
-      product: m[2].trim(),
-      price: parseFloat(m[3].replace(/\./g,"").replace(",",".")),
-      vendor: "",
-    };
+    var withPrice = line.match(/^(\d+)\s+(.+?)\s+\$?\s*([\d.,]+)\s*$/);
+    if (withPrice) {
+      return {id:uid(),qty:parseInt(withPrice[1]),product:withPrice[2].trim(),price:parseFloat(withPrice[3].replace(/\./g,"").replace(",","."))};
+    }
+    var noPrice = line.match(/^(\d+)\s+(.+)$/);
+    if (noPrice) {
+      return {id:uid(),qty:parseInt(noPrice[1]),product:noPrice[2].trim(),price:0};
+    }
+    return null;
   }
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
+  for (var i=0;i<lines.length;i++) {
+    var line = lines[i];
     if (isSkip(line)) continue;
-
     if (isVendor(line)) {
-      if (cur) cur.vendor = VENDEDORES.find(v => v.toLowerCase() === line.toLowerCase());
+      if (cur) cur.vendor = VENDEDORES.find(function(v){return v.toLowerCase()===line.toLowerCase()});
       continue;
     }
-
-    if (isItem(line)) {
-      const item = parseItem(line);
-      if (item && cur) {
-        item.vendor = cur.vendor || "";
-        cur.items.push(item);
-      }
+    if (isSingleName(line) && cur && !hasStreetNumber(line)) {
+      cur.contactName = line;
       continue;
     }
-
-    // It's a header/address line — save previous order if it had items
-    if (cur && cur.items.length > 0) orders.push(cur);
-
-    let addr = line;
-    let localidad = "";
-    let horario = "";
-    let vendor = "";
-
-    // Extract horario (e.g. "0930 a 14", "9 a 14", "09:30 a 14:00")
-    const hm = addr.match(/(\d{2,4})\s*a\s*(\d{1,4})(?!\w)/i);
-    if (hm) { horario = hm[0]; addr = addr.replace(hm[0],"").trim(); }
-
-    // Extract localidad
-    for (const [,bs] of Object.entries(ZONES)) {
-      for (const b of bs) {
-        const esc = b.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-        const re = new RegExp(esc,"i");
-        if (re.test(addr)) { localidad = b; addr = addr.replace(re,"").trim(); break; }
+    if (startsWithQty(line) && cur) {
+      var item = parseItem(line);
+      if (item) { item.vendor = cur.vendor||""; cur.items.push(item); }
+      continue;
+    }
+    if (hasStreetNumber(line)) {
+      if (cur && cur.items.length>0) orders.push(cur);
+      var addr = line;
+      var localidad = "";
+      var horario = "";
+      var vendor = "";
+      var hm = addr.match(/(\d{1,2}(?::?\d{2})?)\s*a\s*(\d{1,2}(?::?\d{2})?)\s*(?:hs)?/i);
+      if (hm) { horario=hm[0]; addr=addr.replace(hm[0],"").trim(); }
+      addr = addr.replace(/^\d{1,2}\/\d{1,2}\s*/,"").trim();
+      for (var zk in ZONES) {
+        var bs=ZONES[zk];
+        for (var bi=0;bi<bs.length;bi++) {
+          var b=bs[bi];
+          var esc=b.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+          var re=new RegExp(esc,"i");
+          if (re.test(addr)){localidad=b;addr=addr.replace(re,"").trim();break;}
+        }
+        if (localidad) break;
       }
-      if (localidad) break;
+      for (var vi=0;vi<VENDEDORES.length;vi++) {
+        var v=VENDEDORES[vi];
+        var vesc=v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+        var vre=new RegExp(vesc,"i");
+        if (vre.test(addr)){vendor=v;addr=addr.replace(vre,"").trim();}
+      }
+      addr=addr.replace(/[,\s]+$/,"").replace(/^\s*[,\s]+/,"").replace(/\s+/g," ").trim();
+      cur={id:uid(),address:addr||line,localidad:localidad,zone:findZone(localidad)||"SIN ZONA",horario:horario,vendor:vendor,items:[],vehicleId:null,status:"pending",contactName:""};
     }
-
-    // Extract inline vendor from header
-    for (const v of VENDEDORES) {
-      const esc = v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-      const re = new RegExp(esc,"i");
-      if (re.test(addr)) { vendor = v; addr = addr.replace(re,"").trim(); }
-    }
-
-    // Clean address
-    addr = addr.replace(/[,\s]+$/,"").replace(/^\s*[,\s]+/,"").replace(/\s+/g," ").trim();
-
-    cur = { id:uid(), address:addr||line, localidad, zone:findZone(localidad)||"SIN ZONA", horario, vendor, items:[], vehicleId:null, status:"pending" };
   }
-  if (cur && cur.items.length > 0) orders.push(cur);
-
-  // Assign order-level vendor to items that don't have one
-  for (const o of orders) {
-    o.items = o.items.map(it => ({ ...it, vendor: it.vendor || o.vendor }));
+  if (cur && cur.items.length>0) orders.push(cur);
+  for (var oi=0;oi<orders.length;oi++) {
+    var o=orders[oi];
+    o.items=o.items.map(function(it){return Object.assign({},it,{vendor:it.vendor||o.vendor})});
   }
-
-  // Auto-merge within same paste (same normalized address)
-  const merged = [];
-  const map = new Map();
-  for (const o of orders) {
-    const key = normalizeAddr(o.address);
+  var merged=[];
+  var map=new Map();
+  for (var mi=0;mi<orders.length;mi++) {
+    var mo=orders[mi];
+    var key=normalizeAddr(mo.address);
     if (map.has(key)) {
-      const ex = map.get(key);
-      ex.items = mergeItems(ex.items, o.items);
-      if (o.address.length > ex.address.length) ex.address = o.address;
-      if (o.horario && !ex.horario) ex.horario = o.horario;
-      if (o.localidad && !ex.localidad) { ex.localidad = o.localidad; ex.zone = o.zone; }
+      var ex=map.get(key);
+      ex.items=mergeItems(ex.items,mo.items);
+      if (mo.address.length>ex.address.length) ex.address=mo.address;
+      if (mo.horario&&!ex.horario) ex.horario=mo.horario;
+      if (mo.localidad&&!ex.localidad){ex.localidad=mo.localidad;ex.zone=mo.zone;}
     } else {
-      const clone = { ...o, items: o.items.map(i=>({...i})) };
-      map.set(key, clone);
+      var clone=Object.assign({},mo,{items:mo.items.map(function(ii){return Object.assign({},ii)})});
+      map.set(key,clone);
       merged.push(clone);
     }
   }
